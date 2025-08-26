@@ -9,7 +9,7 @@ import os
 # Add the src directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from ml.model_trainer import train_models
+from ml.model_trainer import main as train_main
 
 def main():
     """Main entry point for training the spam detection model"""
@@ -17,7 +17,7 @@ def main():
     
     try:
         # Train the model
-        train_models()
+        train_main()
         print("\n✅ Model training completed successfully!")
         
     except Exception as e:

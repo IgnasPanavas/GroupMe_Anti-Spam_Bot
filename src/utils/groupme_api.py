@@ -20,30 +20,8 @@ def get_groups():
 
     print(response.status_code)
     print(response.text)
-    save_response_to_json(response)
     
-def save_response_to_json(response):
-    try:
-        # Parse the response text as JSON
-        response_data = response.json()
-        
-        # Create a filename with timestamp or use a default name
-        filename = "groups_response.json"
-        
-        # Write the response data to a JSON file
-        with open(filename, 'w', encoding='utf-8') as json_file:
-            json.dump(response_data, json_file, indent=2, ensure_ascii=False)
-        
-        print(f"Response saved to {filename}")
-        
-    except json.JSONDecodeError as e:
-        print(f"Error parsing JSON response: {e}")
-        # If response is not valid JSON, save the raw text
-        with open("response_text.txt", 'w', encoding='utf-8') as text_file:
-            text_file.write(response.text)
-        print("Raw response text saved to response_text.txt")
-    except Exception as e:
-        print(f"Error saving response: {e}")
+
 
 def find_admin_groups():
     """
@@ -273,8 +251,10 @@ def get_messages_from_group(group_id, limit=100):
                 
                 # Skip messages from GroupMe system (user_id is typically empty or specific for system messages)
                 # Also skip messages that are join/leave notifications
+                # Skip messages without text (images, attachments, etc.)
                 if (sender_name == 'GroupMe' or 
                     not user_id or 
+                    not text or  # Skip messages without text
                     (text and 'has joined the group' in text) or
                     (text and 'has left the group' in text) or
                     (text and 'has been removed from the group' in text) or
@@ -340,21 +320,6 @@ def get_messages_from_group(group_id, limit=100):
             print("   [No text content]")
         print()
     
-    # Save real user messages to JSON file
-    filename = f"real_user_messages_group_{group_id}.json"
-    try:
-        with open(filename, 'w', encoding='utf-8') as json_file:
-            json.dump({
-                'meta': {'code': 200},
-                'response': {
-                    'messages': real_user_messages,
-                    'count': len(real_user_messages)
-                }
-            }, json_file, indent=2, ensure_ascii=False)
-        print(f"Real user messages saved to {filename}")
-    except Exception as e:
-        print(f"Error saving messages to file: {e}")
-        
     return real_user_messages
         
 
@@ -393,8 +358,22 @@ def save_messages_to_training_csv(messages, group_id, label="regular", max_messa
     # Filter out duplicates and empty messages
     new_messages = []
     for message in messages:
-        text = message.get('text', '').strip()
-        if text and text not in existing_messages:
+        # Skip messages without text (images, attachments, etc.)
+        text = message.get('text')
+        if text is None:
+            continue
+            
+        # Clean and validate the text
+        text = text.strip()
+        if not text or len(text) == 0:
+            continue
+            
+        # Check if this message is already in existing messages
+        if text in existing_messages:
+            continue
+            
+        # Only add non-empty messages
+        if text and text.strip():
             new_messages.append({
                 'text': text,
                 'label': label
@@ -419,8 +398,10 @@ def save_messages_to_training_csv(messages, group_id, label="regular", max_messa
     else:
         combined_df = pd.DataFrame(new_messages)
     
-    # Remove duplicates
+    # Remove duplicates and empty rows
     combined_df = combined_df.drop_duplicates(subset=['text'])
+    combined_df = combined_df.dropna(subset=['text'])  # Remove rows with NaN text
+    combined_df = combined_df[combined_df['text'].str.strip() != '']  # Remove rows with empty/whitespace text
     
     # Limit total messages to prevent excessive data
     if len(combined_df) > max_messages:
@@ -472,4 +453,3 @@ def get_messages_and_save_to_training(group_id, limit=300, label="regular", max_
         print("No messages retrieved for training data")
 
 
-get_messages_and_save_to_training(get_group_id_by_name("Athens Student Investor Club"))

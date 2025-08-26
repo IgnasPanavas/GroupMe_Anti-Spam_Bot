@@ -16,7 +16,7 @@ def main():
     print("=== GroupMe Anti-Spam Bot - Data Collection ===\n")
     
     # Example: Collect data from a specific group
-    group_name = "Athens Student Investor Club"  # Change this to your group name
+    group_name = "Student Financial Planning Association"  # Change this to your group name
     
     try:
         group_id = get_group_id_by_name(group_name)

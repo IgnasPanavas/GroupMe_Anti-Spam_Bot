@@ -147,16 +147,17 @@ class SpamMonitor:
             
             messages = response_data['response']['messages']
             
-            # Filter out system messages
+            # Filter out system messages and non-text messages
             real_messages = []
             for message in messages:
                 sender_name = message.get('name', 'Unknown')
                 user_id = message.get('user_id', '')
                 text = message.get('text', '')
                 
-                # Skip system messages
+                # Skip system messages and messages without text
                 if (sender_name == 'GroupMe' or 
                     not user_id or 
+                    not text or  # Skip messages without text (images, attachments, etc.)
                     (text and 'has joined the group' in text) or
                     (text and 'has left the group' in text) or
                     (text and 'has been removed from the group' in text) or
@@ -261,10 +262,17 @@ class SpamMonitor:
         """
         try:
             sender_name = message.get('name', 'Unknown')
-            text = message.get('text', '')[:100]  # Truncate long messages
+            text = message.get('text', '')
+            
+            # Handle messages without text
+            if not text:
+                text = "[No text content]"
+            
+            # Truncate long messages
+            display_text = text[:100]
             
             # Create notification message
-            notification_text = f"🚨 SPAM DETECTED 🚨\n\nFrom: {sender_name}\nMessage: \"{text}{'...' if len(message.get('text', '')) > 100 else ''}\"\nConfidence: {confidence:.1%}\n\nThis message has been flagged as potential spam by our AI detection system."
+            notification_text = f"🚨 SPAM DETECTED 🚨\n\nFrom: {sender_name}\nMessage: \"{display_text}{'...' if len(text) > 100 else ''}\"\nConfidence: {confidence:.1%}\n\nThis message has been flagged as potential spam by our AI detection system."
             
             COMPLETE_URI = f"{BASE_URI}/groups/{self.group_id}/messages?token={API_KEY}"
             HEADERS = {"Content-Type": "application/json"}

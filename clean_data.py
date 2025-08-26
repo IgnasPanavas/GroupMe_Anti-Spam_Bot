@@ -17,12 +17,12 @@ def main():
     
     # Step 1: Analyze current data
     print("1. Analyzing current data...")
-    analyze_training_data('data/training/master_training_data.csv')
+    analyze_training_data('data/training/master_training_data1.csv')
     
     # Step 2: Clean the data
     print("\n2. Cleaning data...")
     success = clean_master_training_data(
-        input_file='data/training/master_training_data.csv',
+        input_file='data/training/master_training_data1.csv',
         output_file='data/training/master_training_data_clean.csv',
         max_regular_messages=800  # Keep 800 regular messages
     )
@@ -37,7 +37,7 @@ def main():
     
     if success:
         print("\n4. Final analysis of cleaned data...")
-        analyze_training_data('data/training/master_training_data.csv')
+        analyze_training_data('data/training/master_training_data1.csv')
         print("\n✅ Data cleaning completed successfully!")
     else:
         print("\n❌ Failed to replace with cleaned version!")

@@ -43,7 +43,7 @@ def preprocess_text(text):
     
     return text
 
-def load_and_prepare_data(regular_csv='data/training/master_training_data.csv', spam_csv='data/training/training_data.csv'):
+def load_and_prepare_data(regular_csv='data/training/master_training_data.csv', spam_csv='data/training/augmented_spam_data.csv'):
     """
     Load and prepare the training data from both regular and spam CSV files
     """
@@ -51,15 +51,23 @@ def load_and_prepare_data(regular_csv='data/training/master_training_data.csv', 
     
     dfs = []
     
-    # Load regular messages
-    try:
-        regular_df = pd.read_csv(regular_csv)
-        print(f"Loaded {len(regular_df)} regular messages from {regular_csv}")
-        dfs.append(regular_df)
-    except FileNotFoundError:
-        print(f"Warning: {regular_csv} not found. Skipping regular messages.")
-    except Exception as e:
-        print(f"Error loading {regular_csv}: {e}")
+    # Load regular messages from multiple sources
+    regular_sources = [
+        'data/training/master_training_data.csv',
+        'data/training/master_training_data_backup_20250825_201229.csv'
+    ]
+    
+    for regular_file in regular_sources:
+        try:
+            regular_df = pd.read_csv(regular_file)
+            # Filter to only include regular messages
+            regular_df = regular_df[regular_df['label'] == 'regular']
+            print(f"Loaded {len(regular_df)} regular messages from {regular_file}")
+            dfs.append(regular_df)
+        except FileNotFoundError:
+            print(f"Warning: {regular_file} not found. Skipping.")
+        except Exception as e:
+            print(f"Error loading {regular_file}: {e}")
     
     # Load spam messages
     try:
@@ -98,9 +106,30 @@ def load_and_prepare_data(regular_csv='data/training/master_training_data.csv', 
     
     # Check if we have both classes
     unique_labels = df['label'].unique()
+    print(f"Unique labels found: {unique_labels}")
+    
+    # Filter out any rows where label is not 'regular' or 'spam'
+    df = df[df['label'].isin(['regular', 'spam'])]
+    print(f"After filtering valid labels: {len(df)} messages")
+    
+    if len(df) == 0:
+        print("Error: No valid messages found after filtering")
+        return None
+    
+    # Check if we have both classes
+    unique_labels = df['label'].unique()
     if len(unique_labels) < 2:
-        print(f"Warning: Only found {len(unique_labels)} label(s): {unique_labels}")
-        print("You need both 'regular' and 'spam' labels for binary classification.")
+        print("Error: Need at least 2 different labels (regular and spam)")
+        print(f"Available labels: {unique_labels}")
+        return None
+    
+    # Check minimum samples per class
+    label_counts = df['label'].value_counts()
+    min_samples = label_counts.min()
+    if min_samples < 2:
+        print(f"Error: Need at least 2 samples per class. Current minimum: {min_samples}")
+        print(f"Label distribution: {label_counts.to_dict()}")
+        return None
     
     return df
 
@@ -110,8 +139,8 @@ def train_models(X_train, X_test, y_train, y_test):
     """
     models = {
         'Naive Bayes': MultinomialNB(),
-        'Logistic Regression': LogisticRegression(max_iter=1000, random_state=42),
-        'Random Forest': RandomForestClassifier(n_estimators=1000, random_state=42, max_depth=10)
+        'Logistic Regression': LogisticRegression(max_iter=5000, random_state=100),
+        'Random Forest': RandomForestClassifier(n_estimators=5000, random_state=100, max_depth=10)
     }
     
     results = {}
