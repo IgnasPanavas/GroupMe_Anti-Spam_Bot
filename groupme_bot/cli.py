@@ -38,6 +38,28 @@ def setup_logging(config_manager) -> None:
         root_logger.addHandler(file_handler)
 
 
+def resolve_group_id(group_identifier, api_client):
+    """Resolve group name or ID to group ID."""
+    try:
+        # Try to parse as integer (group ID)
+        group_id = int(group_identifier)
+        return str(group_id)
+    except ValueError:
+        # Not an integer, treat as group name
+        groups = api_client.get_groups()
+        
+        # Find group by name (case-insensitive)
+        for group in groups:
+            if group.get('name', '').lower() == group_identifier.lower():
+                return str(group.get('group_id'))
+        
+        # If exact match not found, try partial match
+        for group in groups:
+            if group_identifier.lower() in group.get('name', '').lower():
+                return str(group.get('group_id'))
+        
+        raise ValueError(f"Group '{group_identifier}' not found")
+
 def start_bot(args) -> int:
     """Start the spam monitoring bot."""
     try:
@@ -48,25 +70,33 @@ def start_bot(args) -> int:
         logger = logging.getLogger(__name__)
         logger.info("Starting GroupMe Anti-Spam Bot")
         
-        # Validate group ID
+        # Validate group identifier
         if not args.group_id:
-            logger.error("Group ID is required")
+            logger.error("Group ID or name is required")
             return 1
         
         # Create API client
         api_client = create_api_client()
         
+        # Resolve group identifier to group ID
+        try:
+            resolved_group_id = resolve_group_id(args.group_id, api_client)
+            logger.info(f"Resolved '{args.group_id}' to group ID: {resolved_group_id}")
+        except ValueError as e:
+            logger.error(f"Group resolution failed: {e}")
+            return 1
+        
         # Test API connection
-        group_info = api_client.get_group(args.group_id)
+        group_info = api_client.get_group(resolved_group_id)
         if not group_info:
-            logger.error(f"Group {args.group_id} not found or not accessible")
+            logger.error(f"Group {resolved_group_id} not found or not accessible")
             return 1
         
         logger.info(f"Connected to group: {group_info.get('name', 'Unknown')}")
         
         # Create spam monitor
         monitor = SpamMonitor(
-            group_id=args.group_id,
+            group_id=resolved_group_id,
             api_client=api_client,
             config_manager=config_manager,
             confidence_threshold=args.confidence,
@@ -75,7 +105,7 @@ def start_bot(args) -> int:
         )
         
         # Start monitoring
-        monitor.run()
+        monitor.run_monitor()
         
         return 0
         
@@ -127,6 +157,66 @@ def collect_data(args) -> int:
         return 1
 
 
+def handle_data_commands(args) -> int:
+    """Handle data collection and preparation commands."""
+    try:
+        from groupme_bot.utils.data_collector import DataCollector
+        from groupme_bot.utils.data_preparer import DataPreparer
+        
+        if args.list_groups:
+            collector = DataCollector()
+            groups = collector.list_available_groups()
+            
+            print(f"\nFound {len(groups)} groups:")
+            print("=" * 60)
+            
+            for i, group in enumerate(groups, 1):
+                print(f"{i}. {group.get('name', 'Unknown')}")
+                print(f"   ID: {group.get('group_id')}")
+                print(f"   Members: {group.get('members_count', 'Unknown')}")
+                if group.get('description'):
+                    print(f"   Description: {group['description']}")
+                print()
+            
+            return 0
+        
+        if args.collect_from:
+            collector = DataCollector()
+            results = collector.collect_from_multiple_groups(args.collect_from, args.limit)
+            
+            print(f"\nCollected from {len(results)} groups:")
+            for group_id, filepath in results.items():
+                print(f"  {group_id}: {filepath}")
+            
+            return 0
+        
+        if args.validate:
+            preparer = DataPreparer()
+            preparer.validate_labels(args.validate)
+            return 0
+        
+        if args.combine:
+            preparer = DataPreparer()
+            output_file = preparer.combine_labeled_data()
+            
+            if output_file and args.create_splits:
+                preparer.create_training_splits(output_file)
+            
+            return 0
+        
+        if args.create_splits:
+            preparer = DataPreparer()
+            preparer.create_training_splits("data/training/combined_labeled_data.csv")
+            return 0
+        
+        print("No action specified. Use --help for options.")
+        return 1
+        
+    except Exception as e:
+        logger.error(f"Data command failed: {e}")
+        return 1
+
+
 def list_groups(args) -> int:
     """List available groups."""
     try:
@@ -159,9 +249,12 @@ def main() -> int:
         epilog="""
 Examples:
   groupme-bot start --group-id 123456789
+  groupme-bot start --group-id "Anti-spam-bot-test-group"
   groupme-bot start --group-id 123456789 --confidence 0.9 --interval 60
   groupme-bot train
   groupme-bot collect --group-id 123456789 --limit 100
+  groupme-bot data --collect-from 123456789 987654321 --limit 500
+  groupme-bot data --combine --create-splits
   groupme-bot groups
         """
     )
@@ -170,7 +263,7 @@ Examples:
     
     # Start command
     start_parser = subparsers.add_parser('start', help='Start the spam monitoring bot')
-    start_parser.add_argument('--group-id', required=True, help='Group ID to monitor')
+    start_parser.add_argument('--group-id', required=True, help='Group ID or name to monitor')
     start_parser.add_argument('--confidence', type=float, default=0.8, 
                              help='Confidence threshold (0.0-1.0)')
     start_parser.add_argument('--interval', type=int, default=30,
@@ -190,6 +283,16 @@ Examples:
     collect_parser.add_argument('--label', choices=['regular', 'spam'], default='regular',
                                help='Label for collected messages')
     collect_parser.set_defaults(func=collect_data)
+    
+    # Data collection command
+    data_parser = subparsers.add_parser('data', help='Advanced data collection and preparation')
+    data_parser.add_argument('--collect-from', nargs='+', help='Group IDs to collect messages from')
+    data_parser.add_argument('--limit', type=int, default=100, help='Messages per group')
+    data_parser.add_argument('--combine', action='store_true', help='Combine labeled CSV files')
+    data_parser.add_argument('--create-splits', action='store_true', help='Create training/testing splits')
+    data_parser.add_argument('--validate', help='Validate labels in a CSV file')
+    data_parser.add_argument('--list-groups', action='store_true', help='List available groups')
+    data_parser.set_defaults(func=handle_data_commands)
     
     # Groups command
     groups_parser = subparsers.add_parser('groups', help='List available groups')

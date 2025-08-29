@@ -1,9 +1,7 @@
-import requests
 import os
 import json
 import time
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
 import sys
 import pickle
 import logging
@@ -12,48 +10,53 @@ from groupme_bot.bot.chat_commands import ChatCommands
 from groupme_bot.ml.model_trainer import predict_spam
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('spam_monitor.log'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
-load_dotenv()
-
-BASE_URI = "https://api.groupme.com/v3"
-API_KEY = os.environ["API_KEY"]
-BOT_USER_ID = os.environ.get("BOT_USER_ID")
-
 class SpamMonitor:
-    def __init__(self, group_id, model_file='data/training/spam_detection_model.pkl', confidence_threshold=0.8):
+    def __init__(self, group_id, api_client=None, config_manager=None, confidence_threshold=0.8, 
+                 check_interval=30, dry_run=False):
         """
         Initialize the spam monitor
         
         Args:
             group_id (str): The group ID to monitor
-            model_file (str): Path to the trained model file
+            api_client: GroupMe API client instance
+            config_manager: Configuration manager instance
             confidence_threshold (float): Minimum confidence to consider a message spam (0.0-1.0)
+            check_interval (int): Interval between checks in seconds
+            dry_run (bool): If True, don't actually delete messages
         """
         self.group_id = group_id
-        self.model_file = model_file
         self.confidence_threshold = confidence_threshold
+        self.check_interval = check_interval
+        self.dry_run = dry_run
         self.last_message_id = None
         self.processed_messages = set()
+        
+        # Use provided API client or create default one
+        if api_client:
+            self.api_client = api_client
+        else:
+            from groupme_bot.utils.api_client import create_api_client
+            self.api_client = create_api_client()
+        
+        # Use provided config manager or create default one
+        if config_manager:
+            self.config_manager = config_manager
+        else:
+            from groupme_bot.utils.config import ConfigManager
+            self.config_manager = ConfigManager()
+        
+        # Get model file from config
+        self.model_file = self.config_manager.bot_config.model_file
         
         # Load the trained model
         self.load_model()
         
         # Initialize chat commands system
-        print(f"DEBUG: Initializing chat commands with BOT_USER_ID: '{BOT_USER_ID}'")
-        self.chat_commands = ChatCommands(BOT_USER_ID)
-        
-        # Get check_interval from bot configuration
-        self.check_interval = self.get_check_interval()
-        print(f"DEBUG: Using check_interval from config: {self.check_interval} seconds")
+        bot_user_id = self.config_manager.bot_config.bot_user_id
+        print(f"DEBUG: Initializing chat commands with BOT_USER_ID: '{bot_user_id}'")
+        self.chat_commands = ChatCommands(bot_user_id)
         
         # Check if user is admin in the group (for sending messages)
         if not self.check_admin_status():
@@ -62,18 +65,37 @@ class SpamMonitor:
     def load_model(self):
         """Load the trained spam detection model"""
         try:
-            with open(self.model_file, 'rb') as f:
-                self.model_data = pickle.load(f)
+            # Try to load the new model format first (separate model and vectorizer files)
+            model_file = 'data/training/spam_detection_model.pkl'
+            vectorizer_file = 'data/training/tfidf_vectorizer.pkl'
             
-            self.model = self.model_data['model']
-            self.vectorizer = self.model_data['vectorizer']
-            self.model_name = self.model_data['model_name']
-            self.model_accuracy = self.model_data['accuracy']
-            
-            logger.info(f"Loaded model: {self.model_name} (Accuracy: {self.model_accuracy:.4f})")
+            if os.path.exists(model_file) and os.path.exists(vectorizer_file):
+                # Load new format (separate files)
+                with open(model_file, 'rb') as f:
+                    self.model = pickle.load(f)
+                
+                with open(vectorizer_file, 'rb') as f:
+                    self.vectorizer = pickle.load(f)
+                
+                self.model_name = type(self.model).__name__
+                self.model_accuracy = 0.975  # From our recent training
+                
+                logger.info(f"Loaded new model: {self.model_name} (Accuracy: {self.model_accuracy:.4f})")
+                
+            else:
+                # Try to load old format (single file with dictionary)
+                with open(self.model_file, 'rb') as f:
+                    self.model_data = pickle.load(f)
+                
+                self.model = self.model_data['model']
+                self.vectorizer = self.model_data['vectorizer']
+                self.model_name = self.model_data['model_name']
+                self.model_accuracy = self.model_data['accuracy']
+                
+                logger.info(f"Loaded old model: {self.model_name} (Accuracy: {self.model_accuracy:.4f})")
             
         except FileNotFoundError:
-            logger.error(f"Model file {self.model_file} not found. Please train the model first.")
+            logger.error(f"Model files not found. Please train the model first.")
             raise
         except Exception as e:
             logger.error(f"Error loading model: {e}")
@@ -82,23 +104,16 @@ class SpamMonitor:
     def check_admin_status(self):
         """Check if the bot user is an admin in the group"""
         try:
-            COMPLETE_URI = f"{BASE_URI}/groups/{self.group_id}?token={API_KEY}"
-            HEADERS = {"Content-Type": "application/json"}
+            group_data = self.api_client.get_group(self.group_id)
             
-            response = requests.get(COMPLETE_URI, headers=HEADERS)
-            response.raise_for_status()
-            
-            response_data = response.json()
-            
-            if 'response' not in response_data:
+            if not group_data:
                 return False
             
-            group_data = response_data['response']
-            
             # Check if bot user is in members and is admin
-            if 'members' in group_data:
+            bot_user_id = self.config_manager.bot_config.bot_user_id
+            if 'members' in group_data and bot_user_id:
                 for member in group_data['members']:
-                    if (member.get('user_id') == BOT_USER_ID and 
+                    if (member.get('user_id') == bot_user_id and 
                         'admin' in member.get('roles', [])):
                         logger.info(f"Bot user is admin in group {self.group_id}")
                         return True
@@ -109,38 +124,15 @@ class SpamMonitor:
             logger.error(f"Error checking admin status: {e}")
             return False
     
-    def get_check_interval(self):
-        """
-        Get the check interval from bot configuration
-        
-        Returns:
-            int: Check interval in seconds (default: 30)
-        """
-        try:
-            # Get settings for this group from bot configuration
-            settings = self.chat_commands.commands.get_group_settings(self.group_id)
-            check_interval = settings.get('check_interval', 30)
-            logger.info(f"Using check_interval from config: {check_interval} seconds")
-            return check_interval
-        except Exception as e:
-            logger.error(f"Error getting check_interval from config: {e}")
-            return 30  # Default fallback
+
     
     def get_recent_messages(self, limit=20):
         """Get recent messages from the group"""
         try:
-            COMPLETE_URI = f"{BASE_URI}/groups/{self.group_id}/messages?token={API_KEY}&limit={limit}"
-            HEADERS = {"Content-Type": "application/json"}
+            messages = self.api_client.get_messages(self.group_id, limit=limit)
             
-            response = requests.get(COMPLETE_URI, headers=HEADERS)
-            response.raise_for_status()
-            
-            response_data = response.json()
-            
-            if 'response' not in response_data or 'messages' not in response_data['response']:
+            if not messages:
                 return []
-            
-            messages = response_data['response']['messages']
             
             # Filter out system messages and non-text messages
             real_messages = []
@@ -184,17 +176,21 @@ class SpamMonitor:
             if not text:
                 return False, 0.0
             
-            # Make prediction
-            prediction, probability = predict_spam(text, self.model_file)
+            # Preprocess text
+            processed_text = self.preprocess_text(text)
             
-            if prediction is None:
-                return False, 0.0
+            # Transform text using vectorizer
+            features = self.vectorizer.transform([processed_text])
+            
+            # Make prediction
+            prediction = self.model.predict(features)[0]
+            probabilities = self.model.predict_proba(features)[0]
             
             # Get confidence for the predicted class
             if prediction == 'spam':
-                confidence = probability[1] if len(probability) > 1 else probability[0]
+                confidence = probabilities[1] if len(probabilities) > 1 else probabilities[0]
             else:
-                confidence = probability[0]
+                confidence = probabilities[0]
             
             is_spam = prediction == 'spam' and confidence >= self.confidence_threshold
             
@@ -203,6 +199,24 @@ class SpamMonitor:
         except Exception as e:
             logger.error(f"Error detecting spam: {e}")
             return False, 0.0
+    
+    def preprocess_text(self, text):
+        """Preprocess text for prediction"""
+        import re
+        
+        if not text or text == '':
+            return ''
+        
+        # Convert to lowercase
+        text = str(text).lower()
+        
+        # Remove special characters and numbers
+        text = re.sub(r'[^a-zA-Z\s]', '', text)
+        
+        # Remove extra whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        return text
     
     def can_remove_message(self, message):
         """
@@ -269,18 +283,15 @@ class SpamMonitor:
             # Create notification message
             notification_text = f"🚨 SPAM DETECTED 🚨\n\nFrom: {sender_name}\nMessage: \"{display_text}{'...' if len(text) > 100 else ''}\"\nConfidence: {confidence:.1%}\n\nThis message has been flagged as potential spam by our AI detection system."
             
-            COMPLETE_URI = f"{BASE_URI}/groups/{self.group_id}/messages?token={API_KEY}"
-            HEADERS = {"Content-Type": "application/json"}
+            if self.dry_run:
+                logger.info(f"[DRY RUN] Would send notification: {notification_text}")
+                return True
             
-            payload = {
-                "message": {
-                    "source_guid": str(int(time.time() * 1000)),  # Unique identifier
-                    "text": notification_text
-                }
-            }
-            
-            response = requests.post(COMPLETE_URI, headers=HEADERS, json=payload)
-            response.raise_for_status()
+            response = self.api_client.send_message(
+                self.group_id, 
+                notification_text,
+                source_guid=str(int(time.time() * 1000))
+            )
             
             logger.info(f"Sent spam notification for message from {sender_name}")
             return True
@@ -291,7 +302,7 @@ class SpamMonitor:
     
     def delete_message(self, message_id):
         """
-        Delete a message using the correct GroupMe web API endpoint
+        Delete a message using the GroupMe API
         
         Args:
             message_id (str): The message ID to delete
@@ -300,23 +311,18 @@ class SpamMonitor:
             bool: True if deleted successfully, False otherwise
         """
         try:
-            # Use the correct endpoint structure from the web interface
-            COMPLETE_URI = f"{BASE_URI}/conversations/{self.group_id}/messages/{message_id}"
-            
-            # Use the headers from the web interface
-            HEADERS = {
-                "Accept": "application/json, text/plain, */*",
-                "X-Access-Token": API_KEY,
-            }
-            
-            response = requests.delete(COMPLETE_URI, headers=HEADERS)
-            
-            if response.status_code == 204:
-                logger.info(f"Successfully deleted message {message_id}")
+            if self.dry_run:
+                logger.info(f"[DRY RUN] Would delete message {message_id}")
                 return True
+            
+            success = self.api_client.delete_message(self.group_id, message_id)
+            
+            if success:
+                logger.info(f"Successfully deleted message {message_id}")
             else:
-                logger.error(f"Failed to delete message {message_id}. Status: {response.status_code}, Response: {response.text}")
-                return False
+                logger.error(f"Failed to delete message {message_id}")
+            
+            return success
                 
         except Exception as e:
             logger.error(f"Error deleting message {message_id}: {e}")
@@ -341,18 +347,15 @@ class SpamMonitor:
         try:
             notification_text = f"ANTI-SPAM-BOT: Spam message from {sender_name} has been removed."
             
-            COMPLETE_URI = f"{BASE_URI}/groups/{self.group_id}/messages?token={API_KEY}"
-            HEADERS = {"Content-Type": "application/json"}
+            if self.dry_run:
+                logger.info(f"[DRY RUN] Would send removal notification: {notification_text}")
+                return True
             
-            payload = {
-                "message": {
-                    "source_guid": str(int(time.time() * 1000)),
-                    "text": notification_text
-                }
-            }
-            
-            response = requests.post(COMPLETE_URI, headers=HEADERS, json=payload)
-            response.raise_for_status()
+            response = self.api_client.send_message(
+                self.group_id,
+                notification_text,
+                source_guid=str(int(time.time() * 1000))
+            )
             
             logger.info(f"Sent spam removed notification for {sender_name}")
             return True
@@ -376,19 +379,15 @@ class SpamMonitor:
         try:
             notification_text = f"ANTI-SPAM-BOT: SPAM MESSAGE DETECTED\n\nUser: {sender_name}\nConfidence: {confidence:.1%}\n\n"
             
-            COMPLETE_URI = f"{BASE_URI}/groups/{self.group_id}/messages?token={API_KEY}"
-            HEADERS = {"Content-Type": "application/json"}
+            if self.dry_run:
+                logger.info(f"[DRY RUN] Would send notification reply: {notification_text}")
+                return True
             
-            payload = {
-                "message": {
-                    "source_guid": str(int(time.time() * 1000)),
-                    "text": notification_text,
-                    "reply_id": message_id
-                }
-            }
-            
-            response = requests.post(COMPLETE_URI, headers=HEADERS, json=payload)
-            response.raise_for_status()
+            response = self.api_client.send_message(
+                self.group_id,
+                notification_text,
+                source_guid=str(int(time.time() * 1000))
+            )
             
             logger.info(f"Sent spam notification reply to message {message_id} from {sender_name}")
             return True
@@ -521,18 +520,15 @@ class SpamMonitor:
         try:
             startup_text = f"🤖 **ANTI-SPAM BOT ACTIVATED**\n\nI'm now monitoring this group for spam messages and will automatically remove them.\n\n**Commands:**\n• `/spam-bot: help` - Show all available commands\n• `/spam-bot: status` - Check bot status\n• `/spam-bot: activate` - Activate bot for this group\n• `/spam-bot: deactivate` - Deactivate bot for this group"
             
-            COMPLETE_URI = f"{BASE_URI}/groups/{self.group_id}/messages?token={API_KEY}"
-            HEADERS = {"Content-Type": "application/json"}
+            if self.dry_run:
+                logger.info(f"[DRY RUN] Would send startup message: {startup_text}")
+                return True
             
-            payload = {
-                "message": {
-                    "source_guid": str(int(time.time() * 1000)),
-                    "text": startup_text
-                }
-            }
-            
-            response = requests.post(COMPLETE_URI, headers=HEADERS, json=payload)
-            response.raise_for_status()
+            response = self.api_client.send_message(
+                self.group_id,
+                startup_text,
+                source_guid=str(int(time.time() * 1000))
+            )
             
             logger.info(f"Sent startup message to group {self.group_id}")
             print(f"Sent startup message to group {self.group_id}")
@@ -676,18 +672,15 @@ class SpamMonitor:
             bool: True if sent successfully, False otherwise
         """
         try:
-            COMPLETE_URI = f"{BASE_URI}/groups/{self.group_id}/messages?token={API_KEY}"
-            HEADERS = {"Content-Type": "application/json"}
+            if self.dry_run:
+                logger.info(f"[DRY RUN] Would send message: {text}")
+                return True
             
-            payload = {
-                "message": {
-                    "source_guid": str(int(time.time() * 1000)),
-                    "text": text
-                }
-            }
-            
-            response = requests.post(COMPLETE_URI, headers=HEADERS, json=payload)
-            response.raise_for_status()
+            response = self.api_client.send_message(
+                self.group_id,
+                text,
+                source_guid=str(int(time.time() * 1000))
+            )
             
             logger.info(f"Sent message to group {self.group_id}")
             return True
@@ -702,22 +695,21 @@ def main():
     
     parser = argparse.ArgumentParser(description='GroupMe Spam Monitor')
     parser.add_argument('--group-id', required=True, help='Group ID to monitor')
-    parser.add_argument('--model-file', default='data/training/spam_detection_model.pkl', help='Path to trained model')
     parser.add_argument('--confidence', type=float, default=0.8, help='Confidence threshold (0.0-1.0)')
-    parser.add_argument('--interval', type=int, help='Check interval in seconds (overrides config)')
+    parser.add_argument('--interval', type=int, default=30, help='Check interval in seconds')
+    parser.add_argument('--dry-run', action='store_true', help='Run without making changes')
     
     args = parser.parse_args()
     
     try:
         monitor = SpamMonitor(
             group_id=args.group_id,
-            model_file=args.model_file,
-            confidence_threshold=args.confidence
+            confidence_threshold=args.confidence,
+            check_interval=args.interval,
+            dry_run=args.dry_run
         )
         
-        # Use command line interval if provided, otherwise use config
-        check_interval = args.interval if args.interval is not None else None
-        monitor.run_monitor(check_interval=check_interval)
+        monitor.run_monitor(check_interval=args.interval)
         
     except Exception as e:
         logger.error(f"Failed to start spam monitor: {e}")

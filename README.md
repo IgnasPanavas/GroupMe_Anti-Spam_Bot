@@ -44,6 +44,21 @@ GroupMe_Anti-Spam_Bot/
 
 ## 🛠️ Installation
 
+### Prerequisites
+- Python 3.8+
+- GroupMe API key from https://dev.groupme.com/
+
+### Quick Setup
+```bash
+# Clone the repository
+git clone <repository-url>
+cd GroupMe_Anti-Spam_Bot
+
+# Run automated setup
+./quick-start.sh
+```
+
+### Manual Setup
 1. **Clone the repository:**
    ```bash
    git clone <repository-url>
@@ -53,30 +68,41 @@ GroupMe_Anti-Spam_Bot/
 2. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
+   pip install -e .
    ```
 
 3. **Set up environment variables:**
-   Create a `.env` file with:
-   ```
-   API_KEY=your_groupme_api_key
-   BOT_USER_ID=your_bot_user_id
+   ```bash
+   cp env.example .env
+   # Edit .env with your API key from https://dev.groupme.com/
    ```
 
 ## 🚀 Quick Start
 
-### 1. Collect Training Data
+### Get Your GroupMe API Key
+1. Go to https://dev.groupme.com/
+2. Sign in with your GroupMe account
+3. Click "Create Application"
+4. Copy the "Access Token" - this is your API_KEY
+
+### Find Your Group ID
 ```bash
-python collect_data.py
+python -m groupme_bot.cli groups
 ```
 
-### 2. Train the Model
+### 1. Train the Model
 ```bash
-python train.py
+python -m groupme_bot.cli train
 ```
 
-### 3. Start the Bot
+### 2. Start the Bot
 ```bash
-python main.py --group-id YOUR_GROUP_ID
+python -m groupme_bot.cli start --group-id YOUR_GROUP_ID
+```
+
+### 3. Collect Training Data (Optional)
+```bash
+python -m groupme_bot.cli collect --group-id YOUR_GROUP_ID --limit 100
 ```
 
 ## 📋 Usage
@@ -85,12 +111,17 @@ python main.py --group-id YOUR_GROUP_ID
 
 **Basic usage:**
 ```bash
-python main.py --group-id 109638241
+python -m groupme_bot.cli start --group-id 109638241
 ```
 
 **With custom settings:**
 ```bash
-python main.py --group-id 109638241 --confidence 0.8 --interval 30
+python -m groupme_bot.cli start --group-id 109638241 --confidence 0.8 --interval 30
+```
+
+**Using Makefile:**
+```bash
+make start GROUP_ID=109638241
 ```
 
 ### Chat Commands
@@ -113,17 +144,17 @@ Once the bot is running, use these commands in your GroupMe group:
 
 ### Collect Training Data
 ```bash
-python collect_data.py
+python -m groupme_bot.cli collect --group-id YOUR_GROUP_ID --limit 100
 ```
 
-### Clean Training Data
+### Train Model
 ```bash
-python clean_data.py
+python -m groupme_bot.cli train
 ```
 
-### Manual Data Analysis
+### List Groups
 ```bash
-python -m src.utils.clean_training_data --action analyze
+python -m groupme_bot.cli groups
 ```
 
 ## ⚙️ Configuration
@@ -178,10 +209,11 @@ The bot provides comprehensive logging:
 ### Common Issues
 
 1. **"Model file not found"**
-   - Run `python train.py` to create the model
+   - Run `python -m groupme_bot.cli train` to create the model
 
 2. **"API key error"**
    - Check your `.env` file and API key validity
+   - Get your API key from https://dev.groupme.com/
 
 3. **"Permission denied"**
    - Ensure the bot user is an admin in the group
@@ -189,11 +221,44 @@ The bot provides comprehensive logging:
 4. **"No messages detected"**
    - Check group ID and bot permissions
 
+5. **"Import errors"**
+   - Run `pip install -e .` to install the package
+
 ### Debug Mode
 
 Enable debug output:
 ```bash
-python -m src.utils.debug_commands
+python -m groupme_bot.cli start --group-id YOUR_GROUP_ID --dry-run
+```
+
+## ☁️ Deployment
+
+### Local Development
+```bash
+# Quick setup
+./quick-start.sh
+
+# Manual setup
+pip install -e .
+python -m groupme_bot.cli start --group-id YOUR_GROUP_ID
+```
+
+### AWS EC2 Deployment
+See [deploy/aws-ec2-guide.md](deploy/aws-ec2-guide.md) for detailed instructions.
+
+**Quick EC2 setup:**
+```bash
+# On your EC2 instance
+curl -sSL https://raw.githubusercontent.com/yourusername/GroupMe_Anti-Spam_Bot/main/deploy/ec2-setup.sh | bash
+```
+
+### Docker Deployment
+```bash
+# Build image
+make docker-build
+
+# Run container
+make docker-run GROUP_ID=YOUR_GROUP_ID
 ```
 
 ## 🤝 Contributing
