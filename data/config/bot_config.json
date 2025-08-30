@@ -9,7 +9,7 @@
   ],
   "settings": {
     "confidence_threshold": 0.8,
-    "check_interval": 5,
+    "check_interval": 10,
     "model_file": "spam_detection_model.pkl",
     "show_removal_messages": false,
     "show_startup_message": false

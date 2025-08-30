@@ -3,7 +3,9 @@ Command-line interface for the GroupMe Anti-Spam Bot.
 """
 
 import argparse
+import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -94,13 +96,29 @@ def start_bot(args) -> int:
         
         logger.info(f"Connected to group: {group_info.get('name', 'Unknown')}")
         
+        # Get check interval from config if not specified via command line
+        check_interval = args.interval
+        if check_interval is None or check_interval == 30:  # Default value
+            # Try to get from JSON config file
+            try:
+                config_file = "data/config/bot_config.json"
+                if os.path.exists(config_file):
+                    with open(config_file, 'r') as f:
+                        config_data = json.load(f)
+                    config_interval = config_data.get("settings", {}).get("check_interval")
+                    if config_interval:
+                        check_interval = config_interval
+                        logger.info(f"Using check interval from config file: {check_interval} seconds")
+            except Exception as e:
+                logger.warning(f"Could not read check interval from config file: {e}")
+        
         # Create spam monitor
         monitor = SpamMonitor(
             group_id=resolved_group_id,
             api_client=api_client,
             config_manager=config_manager,
             confidence_threshold=args.confidence,
-            check_interval=args.interval,
+            check_interval=check_interval,
             dry_run=args.dry_run,
         )
         
