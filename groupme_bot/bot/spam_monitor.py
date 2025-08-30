@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class SpamMonitor:
     def __init__(self, group_id, api_client=None, config_manager=None, confidence_threshold=0.8, 
-                 check_interval=30, dry_run=False):
+                 check_interval=15, dry_run=False):
         """
         Initialize the spam monitor
         
