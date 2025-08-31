@@ -59,6 +59,14 @@ const PredictionBox = () => {
     return 'text-red-600';
   };
 
+  const getConfidenceBarColor = () => {
+    if (!prediction) return '';
+    const confidence = prediction.confidence;
+    if (confidence >= 0.9) return '#10b981'; // green-500
+    if (confidence >= 0.7) return '#eab308'; // yellow-500
+    return '#ef4444'; // red-500
+  };
+
   return (
     <div id="prediction-box" className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       <div className="bg-white rounded-lg shadow-lg p-8">
@@ -149,6 +157,14 @@ const PredictionBox = () => {
           <div className="bg-gray-50 rounded-lg p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Analysis Results</h3>
             
+            {/* Debug info - remove this later */}
+            <div className="mb-4 p-3 bg-blue-100 rounded text-sm">
+              <p><strong>Debug Info:</strong></p>
+              <p>Confidence: {prediction.confidence}</p>
+              <p>Confidence Type: {typeof prediction.confidence}</p>
+              <p>Width: {prediction.confidence * 100}%</p>
+            </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Prediction */}
               <div className="bg-white rounded-lg p-4 border">
@@ -170,8 +186,11 @@ const PredictionBox = () => {
                 <div className="mt-2">
                   <div className="w-full bg-gray-200 rounded-full h-2">
                     <div 
-                      className={`h-2 rounded-full ${getConfidenceColor().replace('text-', 'bg-')}`}
-                      style={{ width: `${prediction.confidence * 100}%` }}
+                      className="h-2 rounded-full"
+                      style={{ 
+                        width: `${prediction.confidence * 100}%`,
+                        backgroundColor: getConfidenceBarColor()
+                      }}
                     ></div>
                   </div>
                 </div>
