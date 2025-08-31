@@ -70,7 +70,7 @@ def start_bot(args) -> int:
         setup_logging(config_manager)
         
         logger = logging.getLogger(__name__)
-        logger.info("Starting GroupMe Anti-Spam Bot")
+        logger.info("Starting SpamShield")
         
         # Validate group identifier
         if not args.group_id:
@@ -262,7 +262,7 @@ def list_groups(args) -> int:
 def main() -> int:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="GroupMe Anti-Spam Bot",
+        description="SpamShield - GroupMe Anti-Spam Bot",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
