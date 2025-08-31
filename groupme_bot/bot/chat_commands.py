@@ -162,7 +162,7 @@ class ChatCommands:
             return f"✅ Bot is already active for this group ({group_name})"
         
         if self.commands.activate_group(group_id, group_name):
-            return f"✅ Anti-spam bot activated for {group_name}!\n\nI will now monitor messages and remove spam automatically."
+            return f"✅ **SpamShield** activated for {group_name}!\n\nI will now monitor messages and remove spam automatically."
         else:
             return "❌ Failed to activate bot. Please try again or contact an administrator."
     
@@ -172,7 +172,7 @@ class ChatCommands:
             return f"❌ Bot is not active for this group ({group_name})"
         
         if self.commands.deactivate_group(group_id):
-            return f"✅ Anti-spam bot deactivated for {group_name}.\n\nI will no longer monitor or remove messages from this group."
+            return f"✅ **SpamShield** deactivated for {group_name}.\n\nI will no longer monitor or remove messages from this group."
         else:
             return "❌ Failed to deactivate bot. Please try again or contact an administrator."
     
@@ -181,7 +181,7 @@ class ChatCommands:
         is_active = self.commands.is_group_active(group_id)
         settings = self.commands.get_group_settings(group_id)
         
-        status_text = f"🤖 **Anti-Spam Bot Status**\n\n"
+        status_text = f"🛡️ **SpamShield Status**\n\n"
         status_text += f"**Group:** {group_name}\n"
         status_text += f"**Status:** {'🟢 Active' if is_active else '🔴 Inactive'}\n"
         
@@ -210,7 +210,7 @@ class ChatCommands:
     
     def _cmd_help(self, args, sender_id, sender_name, group_id, group_name):
         """Show help information"""
-        help_text = f"🤖 **Anti-Spam Bot Commands**\n\n"
+        help_text = f"🛡️ **SpamShield Commands**\n\n"
         help_text += f"Use these commands with the prefix: `{self.command_prefix}`\n\n"
         
         help_text += "**Available Commands:**\n"

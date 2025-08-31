@@ -1,4 +1,4 @@
-# GroupMe Anti-Spam Bot
+# SpamShield
 
 An intelligent anti-spam bot for GroupMe with ML-powered detection, chat commands, and comprehensive monitoring capabilities.
 
@@ -99,6 +99,42 @@ python -m groupme_bot.cli train
 ```bash
 python -m groupme_bot.cli start --group-id YOUR_GROUP_ID
 ```
+
+## 🌐 Frontend (Optional)
+
+### Prerequisites
+- Node.js 16+ and npm
+
+### Setup Frontend
+```bash
+# Run the setup script
+./setup-frontend.sh
+
+# Or manually:
+cd spamshield-frontend
+npm install
+```
+
+### Start Frontend
+```bash
+# Terminal 1: Start API server
+python api/prediction_server.py
+
+# Terminal 2: Start React app
+cd spamshield-frontend
+npm start
+```
+
+### Access the Application
+- **Frontend**: http://localhost:3000
+- **API**: http://localhost:5001
+- **Health Check**: http://localhost:5001/api/health
+
+### Features
+- 🧪 **Live Spam Detection** - Test messages with real-time AI predictions
+- 📊 **Interactive Dashboard** - Monitor bot performance and statistics
+- 📱 **Mobile Responsive** - Works perfectly on all devices
+- 🎨 **Professional UI** - Modern design with Tailwind CSS
 
 ### 3. Collect Training Data (Optional)
 ```bash

@@ -518,7 +518,7 @@ class SpamMonitor:
             return True
         
         try:
-            startup_text = f"🤖 **ANTI-SPAM BOT ACTIVATED**\n\nI'm now monitoring this group for spam messages and will automatically remove them.\n\n**Commands:**\n• `/spam-bot: help` - Show all available commands\n• `/spam-bot: status` - Check bot status\n• `/spam-bot: activate` - Activate bot for this group\n• `/spam-bot: deactivate` - Deactivate bot for this group"
+            startup_text = f"🛡️ **SPAMSHIELD ACTIVATED**\n\n**SpamShield** is now active and monitoring this group for spam messages.\n\n**Features:**\n• AI-powered spam detection with 97.5% accuracy\n• Automatic message removal for confirmed spam\n• Real-time monitoring and protection\n\n**Commands:**\n• `/spam-bot: help` - Show all available commands\n• `/spam-bot: status` - Check protection status\n• `/spam-bot: activate` - Enable protection\n• `/spam-bot: deactivate` - Disable protection\n\nYour group is now protected! 🛡️"
             
             if self.dry_run:
                 logger.info(f"[DRY RUN] Would send startup message: {startup_text}")
