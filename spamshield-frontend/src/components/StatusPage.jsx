@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import Header from './Header';
 import Footer from './Footer';
+import UptimeBars from './UptimeBars';
 
-const StatusPage = ({ onBack }) => {
+const StatusPage = () => {
   const [services, setServices] = useState({
     api: { status: 'checking', uptime: null, name: 'API', lastCheck: null },
     lambda: { status: 'checking', uptime: null, name: 'Lambda Function', lastCheck: null },
@@ -13,82 +13,112 @@ const StatusPage = ({ onBack }) => {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [loading, setLoading] = useState(true);
 
+  // Generate empty uptime data - 30-minute intervals for 90 bars total
+  const generateEmptyUptimeData = (days) => {
+    const data = [];
+    const now = new Date();
+    
+    // Create 30-minute intervals, total of 90 bars
+    const totalBars = 90;
+    
+    for (let i = totalBars - 1; i >= 0; i--) {
+      const date = new Date(now);
+      date.setMinutes(date.getMinutes() - (i * 30));
+      
+      // All bars are grey (no data) until we collect real historical data
+      data.push({
+        timestamp: date.toISOString(),
+        status: 'no_data' // This will render as grey
+      });
+    }
+    
+    return data;
+  };
+
   const checkServiceHealth = useCallback(async () => {
     console.log('🔄 Health check started at:', new Date().toLocaleTimeString());
     const newServices = { ...services };
-    const API_BASE = 'https://qtwso5m6o6.execute-api.us-east-1.amazonaws.com/prod';
     
     try {
-      // Check Lambda API health
-      const response = await fetch(`${API_BASE}/api/health`);
+      // Check API health
+      const response = await fetch(`https://api.ignaspanavas.com/health`);
       
       if (response.ok) {
         const healthData = await response.json();
-        newServices.lambda = {
-          ...newServices.lambda,
-          status: 'operational',
-          lastCheck: new Date(),
-          healthData
-        };
-      } else {
-        newServices.lambda = {
-          ...newServices.lambda,
-          status: 'degraded',
-          lastCheck: new Date()
-        };
-      }
-    } catch (error) {
-      newServices.lambda = {
-        ...newServices.lambda,
-        status: 'outage',
-        lastCheck: new Date()
-      };
-    }
-
-    // Check API endpoint
-    try {
-      const response = await fetch(`${API_BASE}/api/stats`);
-      
-      if (response.ok) {
-        const statsData = await response.json();
         newServices.api = {
           ...newServices.api,
           status: 'operational',
           lastCheck: new Date(),
-          statsData
+          healthData,
+          uptimeData: generateEmptyUptimeData(90) // No historical data yet
         };
       } else {
         newServices.api = {
           ...newServices.api,
           status: 'degraded',
-          lastCheck: new Date()
+          lastCheck: new Date(),
+          uptimeData: generateEmptyUptimeData(90)
         };
       }
     } catch (error) {
       newServices.api = {
         ...newServices.api,
         status: 'outage',
-        lastCheck: new Date()
+        lastCheck: new Date(),
+        uptimeData: generateEmptyUptimeData(90)
       };
     }
 
-    // Check EC2 instance status - real health check from instance
+    // Check Lambda function status
     try {
-      // Try to connect to the health check server running on the EC2 instance
-      const response = await fetch(`http://3.91.154.73:8080/health`, {
+      const response = await fetch(`https://api.ignaspanavas.com/health`);
+      
+      if (response.ok) {
+        const healthData = await response.json();
+        newServices.lambda = {
+          ...newServices.lambda,
+          status: 'operational',
+          lastCheck: new Date(),
+          healthData,
+          uptimeData: generateEmptyUptimeData(90)
+        };
+      } else {
+        newServices.lambda = {
+          ...newServices.lambda,
+          status: 'degraded',
+          lastCheck: new Date(),
+          uptimeData: generateEmptyUptimeData(90)
+        };
+      }
+    } catch (error) {
+              newServices.lambda = {
+          ...newServices.lambda,
+          status: 'outage',
+          lastCheck: new Date(),
+          uptimeData: generateEmptyUptimeData(90)
+        };
+    }
+
+    // Check EC2 instance status - use API Gateway endpoint
+    try {
+      const response = await fetch(`https://api.ignaspanavas.com/ec2-status`, {
         signal: AbortSignal.timeout(10000) // 10 second timeout
       });
       
       if (response.ok) {
-        const healthData = await response.json();
+        const ec2Data = await response.json();
         newServices.ec2 = {
           ...newServices.ec2,
-          status: healthData.status === 'healthy' ? 'operational' : 'degraded',
+          status: ec2Data.state === 'running' ? 'operational' : 'degraded',
           lastCheck: new Date(),
+          uptimeData: generateEmptyUptimeData(90),
           instanceInfo: {
-            state: healthData.status,
-            healthData: healthData.data,
-            note: 'Real-time health data from EC2 instance'
+            instanceId: ec2Data.instanceId,
+            state: ec2Data.state,
+            publicIp: ec2Data.publicIp,
+            instanceType: ec2Data.instanceType,
+            region: ec2Data.region,
+            launchTime: ec2Data.launchTime,
           }
         };
       } else {
@@ -96,44 +126,48 @@ const StatusPage = ({ onBack }) => {
           ...newServices.ec2,
           status: 'degraded',
           lastCheck: new Date(),
+          uptimeData: generateEmptyUptimeData(90),
           instanceInfo: {
             instanceId: 'i-0a0001f601291b280',
             state: 'unhealthy',
-            error: 'Health check returned unhealthy status'
+            error: 'EC2 status check failed'
           }
         };
       }
     } catch (error) {
-      // Health check failed - instance might be down or health server not running
+      // EC2 status check failed
       newServices.ec2 = {
         ...newServices.ec2,
         status: 'outage',
         lastCheck: new Date(),
+        uptimeData: generateEmptyUptimeData(90),
         instanceInfo: {
           instanceId: 'i-0a0001f601291b280',
           state: 'unreachable',
-          publicIp: '3.91.154.73',
-          error: 'Health check server not responding'
+          error: 'Cannot reach EC2 status endpoint'
         }
       };
     }
 
-    // GroupMe Bot status - check real bot status from EC2 instance
+    // GroupMe Bot status - use API Gateway endpoint
     try {
-      const response = await fetch(`http://3.91.154.73:8080/health`, {
+      const response = await fetch(`https://api.ignaspanavas.com/bot-status`, {
         signal: AbortSignal.timeout(10000) // 10 second timeout
       });
       
       if (response.ok) {
-        const healthData = await response.json();
+        const botData = await response.json();
         newServices.groupme = {
           ...newServices.groupme,
-          status: healthData.data.bot_status?.running ? 'operational' : 'degraded',
+          status: botData.status === 'operational' ? 'operational' : 'degraded',
           lastCheck: new Date(),
+          uptimeData: generateEmptyUptimeData(90),
           botInfo: {
-            active: healthData.data.bot_status?.running || false,
-            processes: healthData.data.bot_status?.count || 0,
-            healthData: healthData.data
+            active: botData.active, // Use the 'active' boolean field directly
+            processes: botData.processes || 0,
+            lastMessage: botData.lastMessage,
+            groupsMonitored: botData.groupsMonitored,
+            note: 'Real-time data from AWS API'
           }
         };
       } else {
@@ -141,6 +175,7 @@ const StatusPage = ({ onBack }) => {
           ...newServices.groupme,
           status: 'degraded',
           lastCheck: new Date(),
+          uptimeData: generateEmptyUptimeData(90),
           botInfo: {
             active: false,
             error: 'Bot status check failed'
@@ -152,6 +187,7 @@ const StatusPage = ({ onBack }) => {
         ...newServices.groupme,
         status: 'outage',
         lastCheck: new Date(),
+        uptimeData: generateEmptyUptimeData(90),
         botInfo: {
           active: false,
           error: 'Cannot reach bot status endpoint'
@@ -205,14 +241,6 @@ const StatusPage = ({ onBack }) => {
   };
 
   const renderServiceDetails = (service) => {
-    if (service.healthData) {
-      return (
-        <div className="mt-2 text-sm text-gray-600">
-          <p>Model loaded: {service.healthData.model_loaded ? 'Yes' : 'No'}</p>
-          <p>Model type: {service.healthData.model_type || 'Unknown'}</p>
-        </div>
-      );
-    }
     
     if (service.statsData) {
       return (
@@ -226,7 +254,6 @@ const StatusPage = ({ onBack }) => {
     if (service.instanceInfo) {
       return (
         <div className="mt-2 text-sm text-gray-600">
-          <p>State: {service.instanceInfo.state}</p>
           {service.instanceInfo.note && (
             <p className="text-blue-600 italic">{service.instanceInfo.note}</p>
           )}
@@ -249,8 +276,6 @@ const StatusPage = ({ onBack }) => {
     if (service.botInfo) {
       return (
         <div className="mt-2 text-sm text-gray-600">
-          <p>Active: {service.botInfo.active ? '✅ Yes' : '❌ No'}</p>
-          <p>Processes: {service.botInfo.processes || 'N/A'}</p>
           {service.botInfo.healthData && (
             <div className="mt-2 p-2 bg-gray-100 rounded">
               <p className="font-medium">Bot Details:</p>
@@ -283,7 +308,6 @@ const StatusPage = ({ onBack }) => {
   if (loading) {
     return (
       <div className="min-h-screen bg-white">
-        <Header showBackButton={true} onBackClick={onBack} />
         <div className="flex items-center justify-center min-h-screen">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
@@ -296,7 +320,6 @@ const StatusPage = ({ onBack }) => {
 
   return (
     <div className="min-h-screen bg-white">
-      <Header showBackButton={true} onBackClick={onBack} />
       
       {/* Overall Status Banner */}
       <div className={`${isAllOperational ? 'bg-green-500' : 'bg-red-500'} text-white py-6`}>
@@ -315,6 +338,9 @@ const StatusPage = ({ onBack }) => {
         <div className="mb-8">
           <p className="text-gray-600">
             Real-time system status monitoring. All data is live from actual services.
+          </p>
+          <p className="text-sm text-gray-500 mt-2">
+            Uptime over the past 45 hours (30-minute periods). Grey bars indicate no historical data available yet.
           </p>
           <button 
             onClick={checkServiceHealth}
@@ -343,6 +369,15 @@ const StatusPage = ({ onBack }) => {
               </div>
               
               {renderServiceDetails(service)}
+              
+              {/* Uptime Bars */}
+              {service.uptimeData && (
+                <UptimeBars 
+                  uptimeData={service.uptimeData} 
+                  days={90} 
+                  serviceName={service.name}
+                />
+              )}
               
               <div className="mt-4">
                 <div className="flex justify-between items-center">

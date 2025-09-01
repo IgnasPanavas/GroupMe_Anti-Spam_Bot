@@ -1,24 +1,17 @@
-FROM public.ecr.aws/lambda/python:3.9
+FROM public.ecr.aws/lambda/python:3.10
 
 # Copy requirements file
-COPY requirements.txt ${LAMBDA_TASK_ROOT}
+COPY api/requirements.txt ${LAMBDA_TASK_ROOT}/requirements.txt
 
 # Install dependencies
 RUN pip install -r requirements.txt
 
 # Copy function code
-COPY api/ ${LAMBDA_TASK_ROOT}/
+COPY api/lambda_function.py ${LAMBDA_TASK_ROOT}/
 
 # Copy model files
 COPY data/training/spam_detection_model.pkl ${LAMBDA_TASK_ROOT}/data/training/
 COPY data/training/tfidf_vectorizer.pkl ${LAMBDA_TASK_ROOT}/data/training/
-
-# Copy necessary bot utilities
-COPY groupme_bot/utils/ ${LAMBDA_TASK_ROOT}/groupme_bot/utils/
-COPY groupme_bot/__init__.py ${LAMBDA_TASK_ROOT}/groupme_bot/
-
-# Create necessary __init__.py files
-RUN touch ${LAMBDA_TASK_ROOT}/groupme_bot/__init__.py ${LAMBDA_TASK_ROOT}/groupme_bot/utils/__init__.py
 
 # Set the CMD to your handler
 CMD [ "lambda_function.lambda_handler" ]

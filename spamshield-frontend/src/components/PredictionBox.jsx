@@ -72,7 +72,7 @@ const PredictionBox = () => {
       <div className="bg-white rounded-lg shadow-lg p-8">
         <div className="text-center mb-8">
           <h2 className="text-3xl font-bold text-gray-900 mb-4">
-            🧪 Try SpamShield Detection
+            Try SpamShield Detection
           </h2>
           <p className="text-lg text-gray-600">
             Enter any message below to see if our AI detects it as spam
@@ -208,15 +208,7 @@ const PredictionBox = () => {
           </div>
         )}
 
-        {/* Info Section */}
-        <div className="mt-8 bg-blue-50 rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-blue-900 mb-2">How it works</h3>
-          <p className="text-blue-800">
-            SpamShield uses advanced machine learning algorithms to analyze message content, 
-            patterns, and context. Our model has been trained on thousands of messages and 
-            achieves 97.5% accuracy in detecting spam while minimizing false positives.
-          </p>
-        </div>
+        
       </div>
     </div>
   );

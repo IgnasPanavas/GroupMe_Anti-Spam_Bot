@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://qtwso5m6o6.execute-api.us-east-1.amazonaws.com/prod';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://api.ignaspanavas.com';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -33,13 +33,22 @@ api.interceptors.response.use(
 
 export const apiService = {
   // Health check
-  health: () => api.get('/api/health'),
+  health: () => api.get('/health'),
 
   // Prediction - core functionality
-  predict: (text) => api.post('/api/predict', { text }),
+  predict: (text) => api.post('/predict', { text }),
 
   // Statistics - for dashboard
-  getStats: () => api.get('/api/stats'),
+  getStats: () => api.get('/stats'),
+
+  // EC2 Status
+  getEc2Status: () => api.get('/ec2-status'),
+
+  // Bot Status
+  getBotStatus: () => api.get('/bot-status'),
+
+  // Model Status
+  getModelStatus: () => api.get('/model-status'),
 };
 
 export default apiService;

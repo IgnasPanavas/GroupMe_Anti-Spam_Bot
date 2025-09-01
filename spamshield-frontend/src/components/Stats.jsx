@@ -6,25 +6,25 @@ const Stats = ({ stats }) => {
   const statItems = [
     {
       label: 'Messages Protected',
-      value: stats.messages_protected?.toLocaleString() || '0',
+      value: stats.total_messages?.toLocaleString() || '0',
       icon: '🛡️',
       color: 'bg-green-100 text-green-600'
     },
     {
       label: 'Spam Blocked',
-      value: stats.spam_blocked?.toLocaleString() || '0',
+      value: stats.spam_detected?.toLocaleString() || '0',
       icon: '🚫',
       color: 'bg-red-100 text-red-600'
     },
     {
       label: 'Groups Protected',
-      value: stats.groups_protected?.toLocaleString() || '0',
+      value: stats.groups_monitored?.toLocaleString() || '0',
       icon: '👥',
       color: 'bg-blue-100 text-blue-600'
     },
     {
       label: 'Detection Accuracy',
-      value: stats.accuracy || '97.5%',
+      value: `${stats.accuracy || '97.5'}%`,
       icon: '📊',
       color: 'bg-purple-100 text-purple-600'
     }
