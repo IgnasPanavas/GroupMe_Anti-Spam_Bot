@@ -3,13 +3,14 @@ import Header from './components/Header';
 import Hero from './components/Hero';
 import PredictionBox from './components/PredictionBox';
 import Stats from './components/Stats';
+import StatusPage from './components/StatusPage';
 import Footer from './components/Footer';
 import { apiService } from './services/api';
 
 function App() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [currentPage, setCurrentPage] = useState('main'); // 'main' or 'status'
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -17,7 +18,6 @@ function App() {
         const response = await apiService.getStats();
         setStats(response.data);
       } catch (err) {
-        setError('Failed to load statistics');
         console.error('Error fetching stats:', err);
       } finally {
         setLoading(false);
@@ -26,6 +26,20 @@ function App() {
 
     fetchStats();
   }, []);
+
+  const renderPage = () => {
+    if (currentPage === 'status') {
+      return <StatusPage onBack={() => setCurrentPage('main')} />;
+    }
+
+    return (
+      <>
+        <Hero />
+        <PredictionBox />
+        {stats && <Stats stats={stats} />}
+      </>
+    );
+  };
 
   if (loading) {
     return (
@@ -40,10 +54,8 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header />
-      <Hero />
-      <PredictionBox />
-      {stats && <Stats stats={stats} />}
+      <Header onStatusClick={() => setCurrentPage('status')} />
+      {renderPage()}
       <Footer />
     </div>
   );

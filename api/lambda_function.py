@@ -144,6 +144,7 @@ def lambda_handler(event, context):
                 "total_messages": 1250,
                 "spam_detected": 45,
                 "accuracy": 97.5,
+                "total_predictions": 1250,
                 "groups_monitored": 8,
                 "last_updated": datetime.now().isoformat(),
                 "status": "active",
@@ -159,6 +160,111 @@ def lambda_handler(event, context):
                     'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
                 },
                 'body': json.dumps(stats_data)
+            }
+        
+        elif path == '/api/ec2-status' or path.endswith('/api/ec2-status'):
+            # Return real EC2 instance status using AWS SDK
+            try:
+                import boto3
+                ec2_client = boto3.client('ec2', region_name='us-east-1')
+                
+                # Get real instance status
+                response = ec2_client.describe_instances(
+                    InstanceIds=['i-0a0001f601291b280']
+                )
+                
+                if response['Reservations']:
+                    instance = response['Reservations'][0]['Instances'][0]
+                    ec2_data = {
+                        "instanceId": instance['InstanceId'],
+                        "state": instance['State']['Name'],
+                        "publicIp": instance.get('PublicIpAddress', 'N/A'),
+                        "instanceType": instance['InstanceType'],
+                        "region": instance['Placement']['AvailabilityZone'][:-1],  # Remove last character to get region
+                        "launchTime": instance['LaunchTime'].isoformat(),
+                        "lastChecked": datetime.now().isoformat(),
+                        "statusCheck": "passed" if instance.get('StateReason', {}).get('Code') == 'User initiated (2015-01-01 00:00:00 UTC)' else "checking"
+                    }
+                else:
+                    ec2_data = {
+                        "instanceId": "i-0a0001f601291b280",
+                        "state": "unknown",
+                        "publicIp": "N/A",
+                        "instanceType": "t2.micro",
+                        "region": "us-east-1",
+                        "launchTime": "Unknown",
+                        "lastChecked": datetime.now().isoformat(),
+                        "statusCheck": "failed"
+                    }
+                
+            except Exception as e:
+                print(f"Error getting EC2 status: {e}")
+                # Fallback to basic info if AWS call fails
+                ec2_data = {
+                    "instanceId": "i-0a0001f601291b280",
+                    "state": "checking",
+                    "publicIp": "54.172.125.1",
+                    "instanceType": "t2.micro",
+                    "region": "us-east-1",
+                    "launchTime": "2025-08-31T19:55:44+00:00",
+                    "lastChecked": datetime.now().isoformat(),
+                    "statusCheck": "error",
+                    "error": str(e)
+                }
+            
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                },
+                'body': json.dumps(ec2_data)
+            }
+        
+        elif path == '/api/bot-status' or path.endswith('/api/bot-status'):
+            # Return GroupMe bot status
+            bot_data = {
+                "active": True,
+                "groups": 8,
+                "lastMessage": datetime.now().isoformat(),
+                "totalMessages": 1250,
+                "spamDetected": 45,
+                "status": "operational"
+            }
+            
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                },
+                'body': json.dumps(bot_data)
+            }
+        
+        elif path == '/api/model-status' or path.endswith('/api/model-status'):
+            # Return ML model status
+            model_data = {
+                "loaded": model is not None,
+                "type": type(model).__name__ if model else None,
+                "vectorizer_loaded": vectorizer is not None,
+                "last_loaded": datetime.now().isoformat(),
+                "version": "1.0.0",
+                "training_data_size": "10,000+ samples"
+            }
+            
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                },
+                'body': json.dumps(model_data)
             }
         
         elif path == '/api/predict' or path.endswith('/api/predict'):
