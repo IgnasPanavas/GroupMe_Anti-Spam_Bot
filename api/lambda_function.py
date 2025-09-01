@@ -1,168 +1,284 @@
 import json
 import re
+import pickle
+import os
+import sys
+from datetime import datetime
 
-def lambda_handler(event, context):
-    """Lambda handler using simplified spam detection with realistic confidence scores"""
-    # Parse the event
-    http_method = event.get('httpMethod', 'GET')
-    path = event.get('path', '/')
+# Global variables for model
+model = None
+vectorizer = None
+
+def load_model():
+    """Load the trained spam detection model"""
+    global model, vectorizer
     
-    # Handle OPTIONS requests for CORS
-    if http_method == 'OPTIONS':
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-            },
-            'body': json.dumps({'message': 'CORS preflight successful'})
-        }
+    try:
+        # Path to model files (relative to lambda package)
+        model_file = 'data/training/spam_detection_model.pkl'
+        vectorizer_file = 'data/training/tfidf_vectorizer.pkl'
+        
+        if os.path.exists(model_file) and os.path.exists(vectorizer_file):
+            with open(model_file, 'rb') as f:
+                model = pickle.load(f)
+            
+            with open(vectorizer_file, 'rb') as f:
+                vectorizer = pickle.load(f)
+            
+            return True
+        else:
+            print("Model files not found")
+            return False
+            
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return False
+
+def preprocess_text(text):
+    """Preprocess text for prediction"""
+    if not text or text == '':
+        return ''
     
-    # Handle different endpoints
-    if path == '/api/stats' or path.endswith('/api/stats'):
-        # Return stats data that your frontend expects
-        stats_data = {
-            "total_messages": 1250,
-            "spam_detected": 45,
-            "accuracy": 94.2,
-            "groups_monitored": 8,
-            "last_updated": "2025-08-31T20:15:00Z",
-            "status": "active"
-        }
+    # Convert to lowercase
+    text = str(text).lower()
+    
+    # Remove special characters and numbers
+    text = re.sub(r'[^a-zA-Z\s]', '', text)
+    
+    # Remove extra whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
+
+def predict_spam(text):
+    """Predict if text is spam using the trained model"""
+    try:
+        if model is None or vectorizer is None:
+            return {"error": "Model not loaded"}
+        
+        # Preprocess text
+        processed_text = preprocess_text(text)
+        
+        if not processed_text:
+            return {
+                "prediction": "legitimate",
+                "confidence": 0.0,
+                "processed_text": "",
+                "message": "No text content to analyze"
+            }
+        
+        # Transform text using vectorizer
+        features = vectorizer.transform([processed_text])
+        
+        # Make prediction
+        prediction = model.predict(features)[0]
+        probabilities = model.predict_proba(features)[0]
+        
+        # Get confidence for the predicted class
+        if prediction == 'spam':
+            confidence = probabilities[1] if len(probabilities) > 1 else probabilities[0]
+        else:
+            confidence = probabilities[0]
         
         return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-            },
-            'body': json.dumps(stats_data)
+            "prediction": prediction,
+            "confidence": float(confidence),
+            "confidence_percentage": f"{confidence * 100:.1f}%",
+            "processed_text": processed_text,
+            "message": f"Predicted as {prediction} with {confidence * 100:.1f}% confidence"
         }
-    
-    elif path == '/api/predict' or path.endswith('/api/predict'):
-        # Handle spam prediction requests
-        if http_method == 'POST':
-            try:
-                # Parse the request body
-                body = event.get('body', '{}')
-                if isinstance(body, str):
-                    request_data = json.loads(body)
-                else:
-                    request_data = body
-                
-                message_text = request_data.get('text', '')
-                
-                # Enhanced spam detection logic with realistic confidence scores
-                spam_indicators = [
-                    ('selling', 0.3),
-                    ('tickets', 0.25),
-                    ('dm me', 0.2),
-                    ('buy now', 0.35),
-                    ('click here', 0.3),
-                    ('free money', 0.4),
-                    ('urgent', 0.25),
-                    ('limited time', 0.3),
-                    ('act now', 0.25),
-                    ('text', 0.15),
-                    ('404-', 0.2),
-                    ('555-', 0.2),
-                    ('concert', 0.1),
-                    ('parking permit', 0.3),
-                    ('football tickets', 0.25)
-                ]
-                
-                # Calculate spam score based on indicators
-                total_score = 0
-                found_indicators = []
-                
-                for indicator, weight in spam_indicators:
-                    if indicator.lower() in message_text.lower():
-                        total_score += weight
-                        found_indicators.append(indicator)
-                
-                # Normalize score to 0-1 range
-                max_possible_score = sum(weight for _, weight in spam_indicators)
-                spam_score = min(0.95, total_score / max_possible_score)
-                
-                # Determine if it's spam (threshold at 0.3)
-                is_spam = spam_score > 0.3
-                
-                # Calculate confidence based on how many indicators were found
-                if is_spam:
-                    # More indicators = higher confidence
-                    confidence = min(0.95, 0.7 + (len(found_indicators) * 0.05))
-                else:
-                    # Fewer indicators = higher confidence it's legitimate
-                    confidence = min(0.95, 0.8 + (0.1 * (1 - spam_score)))
-                
-                # Format response to match frontend expectations
-                prediction_result = {
-                    "prediction": "spam" if is_spam else "legitimate",
-                    "confidence": round(confidence, 3),
-                    "confidence_percentage": f"{confidence * 100:.1f}%",
-                    "message": message_text,
-                    "processed_text": message_text[:100] + "..." if len(message_text) > 100 else message_text,
-                    "timestamp": "2025-08-31T20:25:00Z",
-                    "debug_info": {
-                        "spam_score": round(spam_score, 3),
-                        "found_indicators": found_indicators,
-                        "total_indicators": len(found_indicators)
-                    }
-                }
-                
+        
+    except Exception as e:
+        print(f"Error making prediction: {e}")
+        return {"error": str(e)}
+
+def lambda_handler(event, context):
+    """Lambda handler using the trained machine learning model"""
+    print(f"Lambda invoked with event: {event}")
+    print(f"Context: {context}")
+    try:
+        # Load model if not already loaded
+        if model is None:
+            if not load_model():
                 return {
-                    'statusCode': 200,
+                    'statusCode': 500,
                     'headers': {
                         'Content-Type': 'application/json',
                         'Access-Control-Allow-Origin': '*',
                         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
                         'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
                     },
-                    'body': json.dumps(prediction_result)
+                    'body': json.dumps({'error': 'Model not available'})
                 }
-                
-            except Exception as e:
-                return {
-                    'statusCode': 400,
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                        'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                    },
-                    'body': json.dumps({'error': 'Invalid request format', 'details': str(e)})
-                }
+        
+        # Parse the event - handle both direct invocation and API Gateway
+        if 'httpMethod' in event:
+            # Direct invocation
+            http_method = event.get('httpMethod', 'GET')
+            path = event.get('path', '/')
         else:
+            # API Gateway invocation
+            http_method = event.get('httpMethod', 'GET')
+            path = event.get('path', '/')
+            # Handle proxy path
+            if 'pathParameters' in event and event['pathParameters'] and 'proxy' in event['pathParameters']:
+                path = '/' + event['pathParameters']['proxy']
+        
+        # Handle OPTIONS requests for CORS
+        if http_method == 'OPTIONS':
             return {
-                'statusCode': 405,
+                'statusCode': 200,
                 'headers': {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': '*',
                     'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
                     'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
                 },
-                'body': json.dumps({'error': 'Method not allowed', 'allowed_methods': ['POST']})
+                'body': json.dumps({'message': 'CORS preflight successful'})
             }
-    
-    elif path == '/api/health' or path.endswith('/api/health'):
+        
+        # Handle different endpoints
+        if path == '/api/stats' or path.endswith('/api/stats'):
+            # Return stats data that your frontend expects
+            stats_data = {
+                "total_messages": 1250,
+                "spam_detected": 45,
+                "accuracy": 97.5,
+                "groups_monitored": 8,
+                "last_updated": datetime.now().isoformat(),
+                "status": "active",
+                "model_type": type(model).__name__ if model else "Not loaded"
+            }
+            
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                },
+                'body': json.dumps(stats_data)
+            }
+        
+        elif path == '/api/predict' or path.endswith('/api/predict'):
+            # Handle spam prediction requests using the trained model
+            if http_method == 'POST':
+                try:
+                    # Parse the request body
+                    body = event.get('body', '{}')
+                    if isinstance(body, str):
+                        request_data = json.loads(body)
+                    else:
+                        request_data = body
+                    
+                    message_text = request_data.get('text', '')
+                    
+                    if not message_text:
+                        return {
+                            'statusCode': 400,
+                            'headers': {
+                                'Content-Type': 'application/json',
+                                'Access-Control-Allow-Origin': '*',
+                                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                            },
+                            'body': json.dumps({'error': 'Text field is required'})
+                        }
+                    
+                    # Use the trained model to make prediction
+                    prediction_result = predict_spam(message_text)
+                    
+                    if "error" in prediction_result:
+                        return {
+                            'statusCode': 500,
+                            'headers': {
+                                'Content-Type': 'application/json',
+                                'Access-Control-Allow-Origin': '*',
+                                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                            },
+                            'body': json.dumps({'error': prediction_result['error']})
+                        }
+                    
+                    # Add timestamp to the response
+                    prediction_result['timestamp'] = datetime.now().isoformat()
+                    
+                    return {
+                        'statusCode': 200,
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*',
+                            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                        },
+                        'body': json.dumps(prediction_result)
+                    }
+                    
+                except Exception as e:
+                    print(f"Error in predict endpoint: {e}")
+                    return {
+                        'statusCode': 400,
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*',
+                            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                        },
+                        'body': json.dumps({'error': 'Invalid request format', 'details': str(e)})
+                    }
+            else:
+                return {
+                    'statusCode': 405,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                        'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                    },
+                    'body': json.dumps({'error': 'Method not allowed', 'allowed_methods': ['POST']})
+                }
+        
+        elif path == '/api/health' or path.endswith('/api/health'):
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                },
+                'body': json.dumps({
+                    'status': 'healthy', 
+                    'message': 'SpamShield API is running',
+                    'model_loaded': model is not None,
+                    'model_type': type(model).__name__ if model else None
+                })
+            }
+        
+        else:
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                },
+                'body': json.dumps({
+                    'message': 'Hello from Lambda!',
+                    'status': 'working',
+                    'path': path,
+                    'model_loaded': model is not None
+                })
+            }
+    except Exception as e:
+        print(f"Error in lambda_handler: {e}")
+        import traceback
+        traceback_str = traceback.format_exc()
+        print(f"Traceback: {traceback_str}")
         return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-            },
-            'body': json.dumps({'status': 'healthy', 'message': 'SpamShield API is running'})
-        }
-    
-    else:
-        return {
-            'statusCode': 200,
+            'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*',
@@ -170,8 +286,9 @@ def lambda_handler(event, context):
                 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
             },
             'body': json.dumps({
-                'message': 'Hello from Lambda!',
-                'status': 'working',
-                'path': path
+                'error': 'Internal server error', 
+                'details': str(e),
+                'traceback': traceback_str,
+                'event_received': str(event)[:500] if event else 'No event received'
             })
         }

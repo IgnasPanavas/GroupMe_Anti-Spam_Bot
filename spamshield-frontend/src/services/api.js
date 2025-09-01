@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -33,26 +33,13 @@ api.interceptors.response.use(
 
 export const apiService = {
   // Health check
-  health: () => api.get('/health'),
+  health: () => api.get('/api/health'),
 
-  // Prediction
-  predict: (text) => api.post('/predict', { text }),
+  // Prediction - core functionality
+  predict: (text) => api.post('/api/predict', { text }),
 
-  // Statistics
-  getStats: () => api.get('/stats'),
-
-  // Groups
-  getGroups: () => api.get('/groups'),
-
-  // Activity
-  getActivity: () => api.get('/activity'),
-
-  // Settings
-  getSettings: () => api.get('/settings'),
-  updateSettings: (settings) => api.post('/settings', settings),
-
-  // Test predictions
-  testPredictions: () => api.get('/test'),
+  // Statistics - for dashboard
+  getStats: () => api.get('/api/stats'),
 };
 
 export default apiService;

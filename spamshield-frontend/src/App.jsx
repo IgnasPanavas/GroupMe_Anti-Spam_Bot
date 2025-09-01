@@ -1,11 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import Hero from './components/Hero';
 import PredictionBox from './components/PredictionBox';
-import Dashboard from './components/Dashboard';
 import Stats from './components/Stats';
-import Charts from './components/Charts';
 import Footer from './components/Footer';
 import { apiService } from './services/api';
 
@@ -42,24 +39,13 @@ function App() {
   }
 
   return (
-    <Router>
-      <div className="min-h-screen bg-gray-50">
-        <Header />
-        
-        <Routes>
-          <Route path="/" element={
-            <div>
-              <Hero />
-              <PredictionBox />
-              {stats && <Stats stats={stats} />}
-            </div>
-          } />
-          <Route path="/dashboard" element={<Dashboard />} />
-        </Routes>
-        
-        <Footer />
-      </div>
-    </Router>
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <Hero />
+      <PredictionBox />
+      {stats && <Stats stats={stats} />}
+      <Footer />
+    </div>
   );
 }
 

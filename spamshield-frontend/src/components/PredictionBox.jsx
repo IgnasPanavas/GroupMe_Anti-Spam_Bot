@@ -54,16 +54,16 @@ const PredictionBox = () => {
   const getConfidenceColor = () => {
     if (!prediction) return '';
     const confidence = prediction.confidence;
-    if (confidence >= 0.9) return 'text-green-600';
-    if (confidence >= 0.7) return 'text-yellow-600';
+    if (confidence >= 0.8) return 'text-green-600';
+    if (confidence >= 0.6) return 'text-yellow-600';
     return 'text-red-600';
   };
 
   const getConfidenceBarColor = () => {
     if (!prediction) return '';
     const confidence = prediction.confidence;
-    if (confidence >= 0.9) return '#10b981'; // green-500
-    if (confidence >= 0.7) return '#eab308'; // yellow-500
+    if (confidence >= 0.8) return '#10b981'; // green-500
+    if (confidence >= 0.6) return '#eab308'; // yellow-500
     return '#ef4444'; // red-500
   };
 
@@ -157,13 +157,7 @@ const PredictionBox = () => {
           <div className="bg-gray-50 rounded-lg p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Analysis Results</h3>
             
-            {/* Debug info - remove this later */}
-            <div className="mb-4 p-3 bg-blue-100 rounded text-sm">
-              <p><strong>Debug Info:</strong></p>
-              <p>Confidence: {prediction.confidence}</p>
-              <p>Confidence Type: {typeof prediction.confidence}</p>
-              <p>Width: {prediction.confidence * 100}%</p>
-            </div>
+
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Prediction */}
