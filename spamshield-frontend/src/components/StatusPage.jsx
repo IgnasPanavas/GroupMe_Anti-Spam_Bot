@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Footer from './Footer';
 import UptimeBars from './UptimeBars';
 
@@ -12,24 +12,33 @@ const StatusPage = () => {
 
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [loading, setLoading] = useState(true);
+  const servicesRef = useRef(services);
 
-  // Generate empty uptime data - 30-minute intervals for 90 bars total
-  const generateEmptyUptimeData = (days) => {
+
+
+  // Generate uptime data with current status for recent periods
+  const generateUptimeDataWithCurrentStatus = (currentStatus, days = 90) => {
     const data = [];
     const now = new Date();
-    
-    // Create 30-minute intervals, total of 90 bars
     const totalBars = 90;
     
     for (let i = totalBars - 1; i >= 0; i--) {
       const date = new Date(now);
       date.setMinutes(date.getMinutes() - (i * 30));
       
-      // All bars are grey (no data) until we collect real historical data
-      data.push({
-        timestamp: date.toISOString(),
-        status: 'no_data' // This will render as grey
-      });
+      // For recent periods (last 6 bars = 3 hours), use current status
+      if (i < 6) {
+        data.push({
+          timestamp: date.toISOString(),
+          status: currentStatus
+        });
+      } else {
+        // For older periods, show no data (grey bars)
+        data.push({
+          timestamp: date.toISOString(),
+          status: 'no_data'
+        });
+      }
     }
     
     return data;
@@ -37,7 +46,7 @@ const StatusPage = () => {
 
   const checkServiceHealth = useCallback(async () => {
     console.log('🔄 Health check started at:', new Date().toLocaleTimeString());
-    const newServices = { ...services };
+    const newServices = { ...servicesRef.current };
     
     try {
       // Check API health
@@ -50,14 +59,14 @@ const StatusPage = () => {
           status: 'operational',
           lastCheck: new Date(),
           healthData,
-          uptimeData: generateEmptyUptimeData(90) // No historical data yet
+          uptimeData: generateUptimeDataWithCurrentStatus('operational')
         };
       } else {
         newServices.api = {
           ...newServices.api,
           status: 'degraded',
           lastCheck: new Date(),
-          uptimeData: generateEmptyUptimeData(90)
+          uptimeData: generateUptimeDataWithCurrentStatus('degraded')
         };
       }
     } catch (error) {
@@ -65,7 +74,7 @@ const StatusPage = () => {
         ...newServices.api,
         status: 'outage',
         lastCheck: new Date(),
-        uptimeData: generateEmptyUptimeData(90)
+        uptimeData: generateUptimeDataWithCurrentStatus('outage')
       };
     }
 
@@ -80,14 +89,14 @@ const StatusPage = () => {
           status: 'operational',
           lastCheck: new Date(),
           healthData,
-          uptimeData: generateEmptyUptimeData(90)
+          uptimeData: generateUptimeDataWithCurrentStatus('operational')
         };
       } else {
         newServices.lambda = {
           ...newServices.lambda,
           status: 'degraded',
           lastCheck: new Date(),
-          uptimeData: generateEmptyUptimeData(90)
+          uptimeData: generateUptimeDataWithCurrentStatus('degraded')
         };
       }
     } catch (error) {
@@ -95,7 +104,7 @@ const StatusPage = () => {
           ...newServices.lambda,
           status: 'outage',
           lastCheck: new Date(),
-          uptimeData: generateEmptyUptimeData(90)
+          uptimeData: generateUptimeDataWithCurrentStatus('outage')
         };
     }
 
@@ -107,11 +116,12 @@ const StatusPage = () => {
       
       if (response.ok) {
         const ec2Data = await response.json();
+        const ec2Status = ec2Data.state === 'running' ? 'operational' : 'degraded';
         newServices.ec2 = {
           ...newServices.ec2,
-          status: ec2Data.state === 'running' ? 'operational' : 'degraded',
+          status: ec2Status,
           lastCheck: new Date(),
-          uptimeData: generateEmptyUptimeData(90),
+          uptimeData: generateUptimeDataWithCurrentStatus(ec2Status),
           instanceInfo: {
             instanceId: ec2Data.instanceId,
             state: ec2Data.state,
@@ -126,7 +136,7 @@ const StatusPage = () => {
           ...newServices.ec2,
           status: 'degraded',
           lastCheck: new Date(),
-          uptimeData: generateEmptyUptimeData(90),
+          uptimeData: generateUptimeDataWithCurrentStatus('degraded'),
           instanceInfo: {
             instanceId: 'i-0a0001f601291b280',
             state: 'unhealthy',
@@ -140,7 +150,7 @@ const StatusPage = () => {
         ...newServices.ec2,
         status: 'outage',
         lastCheck: new Date(),
-        uptimeData: generateEmptyUptimeData(90),
+        uptimeData: generateUptimeDataWithCurrentStatus('outage'),
         instanceInfo: {
           instanceId: 'i-0a0001f601291b280',
           state: 'unreachable',
@@ -157,11 +167,12 @@ const StatusPage = () => {
       
       if (response.ok) {
         const botData = await response.json();
+        const botStatus = botData.status === 'operational' ? 'operational' : 'degraded';
         newServices.groupme = {
           ...newServices.groupme,
-          status: botData.status === 'operational' ? 'operational' : 'degraded',
+          status: botStatus,
           lastCheck: new Date(),
-          uptimeData: generateEmptyUptimeData(90),
+          uptimeData: generateUptimeDataWithCurrentStatus(botStatus),
           botInfo: {
             active: botData.active, // Use the 'active' boolean field directly
             processes: botData.processes || 0,
@@ -175,7 +186,7 @@ const StatusPage = () => {
           ...newServices.groupme,
           status: 'degraded',
           lastCheck: new Date(),
-          uptimeData: generateEmptyUptimeData(90),
+          uptimeData: generateUptimeDataWithCurrentStatus('degraded'),
           botInfo: {
             active: false,
             error: 'Bot status check failed'
@@ -187,7 +198,7 @@ const StatusPage = () => {
         ...newServices.groupme,
         status: 'outage',
         lastCheck: new Date(),
-        uptimeData: generateEmptyUptimeData(90),
+        uptimeData: generateUptimeDataWithCurrentStatus('outage'),
         botInfo: {
           active: false,
           error: 'Cannot reach bot status endpoint'
@@ -198,7 +209,8 @@ const StatusPage = () => {
     setServices(newServices);
     setLastUpdated(new Date());
     setLoading(false);
-  }, []); // Empty dependency array to prevent infinite loops
+    servicesRef.current = newServices;
+  }, []); // No dependencies needed now
 
   useEffect(() => {
     checkServiceHealth();
@@ -340,7 +352,7 @@ const StatusPage = () => {
             Real-time system status monitoring. All data is live from actual services.
           </p>
           <p className="text-sm text-gray-500 mt-2">
-            Uptime over the past 45 hours (30-minute periods). Grey bars indicate no historical data available yet.
+            Uptime over the past 45 hours (30-minute periods). Recent bars show current status, grey bars indicate no historical data available yet.
           </p>
           <button 
             onClick={checkServiceHealth}

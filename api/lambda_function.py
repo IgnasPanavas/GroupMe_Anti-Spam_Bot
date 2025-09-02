@@ -14,24 +14,51 @@ def load_model():
     global model, vectorizer
     
     try:
+        print("DEBUG: load_model() called")
         # Path to model files (relative to lambda package)
         model_file = 'data/training/spam_detection_model.pkl'
         vectorizer_file = 'data/training/tfidf_vectorizer.pkl'
         
+        print(f"DEBUG: Checking if model file exists: {model_file}")
+        print(f"DEBUG: Checking if vectorizer file exists: {vectorizer_file}")
+        print(f"DEBUG: Current working directory: {os.getcwd()}")
+        print(f"DEBUG: Listing data/training directory:")
+        try:
+            print(f"DEBUG: {os.listdir('data/training')}")
+        except Exception as e:
+            print(f"DEBUG: Error listing directory: {e}")
+        
         if os.path.exists(model_file) and os.path.exists(vectorizer_file):
+            print("DEBUG: Both files exist, loading model...")
             with open(model_file, 'rb') as f:
                 model = pickle.load(f)
+            print(f"DEBUG: Model loaded successfully: {type(model)}")
             
+            print("DEBUG: Loading vectorizer...")
             with open(vectorizer_file, 'rb') as f:
                 vectorizer = pickle.load(f)
+            print(f"DEBUG: Vectorizer loaded successfully: {type(vectorizer)}")
+            
+            print("DEBUG: Checking vectorizer attributes...")
+            if hasattr(vectorizer, 'vocabulary_'):
+                print(f"DEBUG: Vectorizer has vocabulary_ with {len(vectorizer.vocabulary_)} terms")
+            else:
+                print("DEBUG: Vectorizer missing vocabulary_ attribute!")
+            
+            if hasattr(vectorizer, 'idf_'):
+                print(f"DEBUG: Vectorizer has idf_ with length {len(vectorizer.idf_)}")
+            else:
+                print("DEBUG: Vectorizer missing idf_ attribute!")
             
             return True
         else:
-            print("Model files not found")
+            print("DEBUG: Model files not found")
             return False
             
     except Exception as e:
         print(f"Error loading model: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def preprocess_text(text):
@@ -53,11 +80,19 @@ def preprocess_text(text):
 def predict_spam(text):
     """Predict if text is spam using the trained model"""
     try:
+        print(f"DEBUG: predict_spam called with text: {text}")
+        print(f"DEBUG: Global model is None: {model is None}")
+        print(f"DEBUG: Global vectorizer is None: {vectorizer is None}")
+        print(f"DEBUG: Model type: {type(model)}")
+        print(f"DEBUG: Vectorizer type: {type(vectorizer)}")
+        
         if model is None or vectorizer is None:
+            print("DEBUG: Model or vectorizer is None, returning error")
             return {"error": "Model not loaded"}
         
         # Preprocess text
         processed_text = preprocess_text(text)
+        print(f"DEBUG: Processed text: {processed_text}")
         
         if not processed_text:
             return {
@@ -68,11 +103,14 @@ def predict_spam(text):
             }
         
         # Transform text using vectorizer
+        print("DEBUG: About to call vectorizer.transform")
         features = vectorizer.transform([processed_text])
+        print(f"DEBUG: Transform successful, features shape: {features.shape}")
         
         # Make prediction
         prediction = model.predict(features)[0]
         probabilities = model.predict_proba(features)[0]
+        print(f"DEBUG: Prediction: {prediction}, Probabilities: {probabilities}")
         
         # Get confidence for the predicted class
         if prediction == 'spam':
@@ -90,6 +128,8 @@ def predict_spam(text):
         
     except Exception as e:
         print(f"Error making prediction: {e}")
+        import traceback
+        traceback.print_exc()
         return {"error": str(e)}
 
 def lambda_handler(event, context):

@@ -45,7 +45,7 @@ const UptimeBars = ({ uptimeData, days = 90, serviceName }) => {
             break;
           case 'no_data':
             barColor = 'bg-gray-300';
-            tooltip = `Period ${i + 1}: No data available`;
+            tooltip = `Period ${i + 1}: No historical data available`;
             break;
           default:
             barColor = 'bg-gray-300';
