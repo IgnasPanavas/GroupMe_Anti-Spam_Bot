@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Footer from './Footer';
 import UptimeBars from './UptimeBars';
+import { apiService } from '../services/api';
 
 const StatusPage = () => {
   const [services, setServices] = useState({
@@ -12,203 +13,177 @@ const StatusPage = () => {
 
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const servicesRef = useRef(services);
 
 
 
-  // Generate uptime data with current status for recent periods
-  const generateUptimeDataWithCurrentStatus = (currentStatus, days = 90) => {
-    const data = [];
-    const now = new Date();
-    const totalBars = 90;
-    
-    for (let i = totalBars - 1; i >= 0; i--) {
-      const date = new Date(now);
-      date.setMinutes(date.getMinutes() - (i * 30));
-      
-      // For recent periods (last 6 bars = 3 hours), use current status
-      if (i < 6) {
-        data.push({
-          timestamp: date.toISOString(),
-          status: currentStatus
-        });
-      } else {
-        // For older periods, show no data (grey bars)
-        data.push({
-          timestamp: date.toISOString(),
-          status: 'no_data'
-        });
-      }
-    }
-    
-    return data;
-  };
+  // No synthetic uptime generation. Bars display only persisted history.
 
-  const checkServiceHealth = useCallback(async () => {
+  const checkServiceHealth = useCallback(async (isManualRefresh = false) => {
     console.log('🔄 Health check started at:', new Date().toLocaleTimeString());
+    if (isManualRefresh) {
+      setRefreshing(true);
+    }
     const newServices = { ...servicesRef.current };
     
     try {
-      // Check API health
-      const response = await fetch(`https://api.ignaspanavas.com/health`);
-      
-      if (response.ok) {
-        const healthData = await response.json();
-        newServices.api = {
-          ...newServices.api,
-          status: 'operational',
-          lastCheck: new Date(),
-          healthData,
-          uptimeData: generateUptimeDataWithCurrentStatus('operational')
-        };
-      } else {
-        newServices.api = {
-          ...newServices.api,
-          status: 'degraded',
-          lastCheck: new Date(),
-          uptimeData: generateUptimeDataWithCurrentStatus('degraded')
-        };
-      }
+      // Check API health via API Gateway
+      const response = await apiService.health();
+      newServices.api = {
+        ...newServices.api,
+        status: response.status === 200 ? 'operational' : 'degraded',
+        lastCheck: new Date(),
+        healthData: response.data
+      };
     } catch (error) {
       newServices.api = {
         ...newServices.api,
         status: 'outage',
-        lastCheck: new Date(),
-        uptimeData: generateUptimeDataWithCurrentStatus('outage')
+        lastCheck: new Date()
       };
     }
 
     // Check Lambda function status
     try {
-      const response = await fetch(`https://api.ignaspanavas.com/health`);
-      
-      if (response.ok) {
-        const healthData = await response.json();
-        newServices.lambda = {
-          ...newServices.lambda,
-          status: 'operational',
-          lastCheck: new Date(),
-          healthData,
-          uptimeData: generateUptimeDataWithCurrentStatus('operational')
-        };
-      } else {
-        newServices.lambda = {
-          ...newServices.lambda,
-          status: 'degraded',
-          lastCheck: new Date(),
-          uptimeData: generateUptimeDataWithCurrentStatus('degraded')
-        };
-      }
+      // Consider Lambda reachable if API health is OK
+      const response = await apiService.health();
+      newServices.lambda = {
+        ...newServices.lambda,
+        status: response.status === 200 ? 'operational' : 'degraded',
+        lastCheck: new Date(),
+        healthData: response.data
+      };
     } catch (error) {
-              newServices.lambda = {
-          ...newServices.lambda,
-          status: 'outage',
-          lastCheck: new Date(),
-          uptimeData: generateUptimeDataWithCurrentStatus('outage')
-        };
+      newServices.lambda = {
+        ...newServices.lambda,
+        status: 'outage',
+        lastCheck: new Date()
+      };
     }
 
     // Check EC2 instance status - use API Gateway endpoint
     try {
-      const response = await fetch(`https://api.ignaspanavas.com/ec2-status`, {
-        signal: AbortSignal.timeout(10000) // 10 second timeout
-      });
-      
-      if (response.ok) {
-        const ec2Data = await response.json();
-        const ec2Status = ec2Data.state === 'running' ? 'operational' : 'degraded';
-        newServices.ec2 = {
-          ...newServices.ec2,
-          status: ec2Status,
-          lastCheck: new Date(),
-          uptimeData: generateUptimeDataWithCurrentStatus(ec2Status),
-          instanceInfo: {
-            instanceId: ec2Data.instanceId,
-            state: ec2Data.state,
-            publicIp: ec2Data.publicIp,
-            instanceType: ec2Data.instanceType,
-            region: ec2Data.region,
-            launchTime: ec2Data.launchTime,
-          }
-        };
-      } else {
-        newServices.ec2 = {
-          ...newServices.ec2,
-          status: 'degraded',
-          lastCheck: new Date(),
-          uptimeData: generateUptimeDataWithCurrentStatus('degraded'),
-          instanceInfo: {
-            instanceId: 'i-0a0001f601291b280',
-            state: 'unhealthy',
-            error: 'EC2 status check failed'
-          }
-        };
-      }
+      const response = await apiService.getEc2Status();
+      const ec2Data = response.data;
+      const ec2Status = ec2Data.state === 'running' ? 'operational' : 'degraded';
+      newServices.ec2 = {
+        ...newServices.ec2,
+        status: ec2Status,
+        lastCheck: new Date(),
+        instanceInfo: ec2Data
+      };
     } catch (error) {
-      // EC2 status check failed
       newServices.ec2 = {
         ...newServices.ec2,
         status: 'outage',
         lastCheck: new Date(),
-        uptimeData: generateUptimeDataWithCurrentStatus('outage'),
-        instanceInfo: {
-          instanceId: 'i-0a0001f601291b280',
-          state: 'unreachable',
-          error: 'Cannot reach EC2 status endpoint'
-        }
+        instanceInfo: { error: 'Cannot reach EC2 status endpoint' }
       };
     }
 
     // GroupMe Bot status - use API Gateway endpoint
     try {
-      const response = await fetch(`https://api.ignaspanavas.com/bot-status`, {
-        signal: AbortSignal.timeout(10000) // 10 second timeout
-      });
-      
-      if (response.ok) {
-        const botData = await response.json();
-        const botStatus = botData.status === 'operational' ? 'operational' : 'degraded';
-        newServices.groupme = {
-          ...newServices.groupme,
-          status: botStatus,
-          lastCheck: new Date(),
-          uptimeData: generateUptimeDataWithCurrentStatus(botStatus),
-          botInfo: {
-            active: botData.active, // Use the 'active' boolean field directly
-            processes: botData.processes || 0,
-            lastMessage: botData.lastMessage,
-            groupsMonitored: botData.groupsMonitored,
-            note: 'Real-time data from AWS API'
-          }
-        };
-      } else {
-        newServices.groupme = {
-          ...newServices.groupme,
-          status: 'degraded',
-          lastCheck: new Date(),
-          uptimeData: generateUptimeDataWithCurrentStatus('degraded'),
-          botInfo: {
-            active: false,
-            error: 'Bot status check failed'
-          }
-        };
-      }
+      const response = await apiService.getBotStatus();
+      const botData = response.data;
+      const botStatus = botData.active ? 'operational' : 'degraded';
+      newServices.groupme = {
+        ...newServices.groupme,
+        status: botStatus,
+        lastCheck: new Date(),
+        botInfo: botData
+      };
     } catch (error) {
       newServices.groupme = {
         ...newServices.groupme,
         status: 'outage',
         lastCheck: new Date(),
-        uptimeData: generateUptimeDataWithCurrentStatus('outage'),
-        botInfo: {
-          active: false,
-          error: 'Cannot reach bot status endpoint'
-        }
+        botInfo: { active: false, error: 'Cannot reach bot status endpoint' }
       };
+    }
+
+    // Persist per-service statuses to uptime history
+    try {
+      const persist = async (serviceKey, statusValue, details = {}) => {
+        await apiService.postUptimeRecord({ service: serviceKey, status: statusValue, details });
+      };
+      await Promise.all([
+        persist('api', newServices.api.status),
+        persist('lambda', newServices.lambda.status),
+        persist('ec2', newServices.ec2.status),
+        persist('bot', newServices.groupme.status),
+      ]);
+    } catch (e) {
+      // Non-blocking
+    }
+
+    // Fetch and apply uptime history for bars (real persistent data)
+    const totalBars = 90; // 5-minute intervals
+    const fetchHistory = async (serviceKey, fallbackStatus = 'no_data') => {
+      try {
+        const resp = await apiService.getUptimeHistory({ minutes: 450, limit: totalBars, service: serviceKey });
+        const records = resp?.data?.records || [];
+        const historyData = records.slice(-totalBars).map(r => ({ timestamp: r.timestamp, status: r.status || 'no_data' }));
+        
+        // Always add current status as the most recent bar
+        const currentTime = new Date().toISOString();
+        const currentStatus = newServices[serviceKey === 'bot' ? 'groupme' : serviceKey]?.status || fallbackStatus;
+        
+        // Add current status to the end of history
+        historyData.push({ timestamp: currentTime, status: currentStatus });
+        
+        return historyData;
+      } catch (error) {
+        console.warn(`Failed to fetch uptime history for ${serviceKey}:`, error);
+        // Return fallback data showing current status and some historical context
+        const fallbackData = [];
+        const currentTime = new Date();
+        const currentStatus = newServices[serviceKey === 'bot' ? 'groupme' : serviceKey]?.status || fallbackStatus;
+        
+        // Generate minimal fallback data with current status as the latest bar
+        for (let i = 0; i < totalBars - 1; i++) {
+          const timestamp = new Date(currentTime.getTime() - (totalBars - 1 - i) * 5 * 60 * 1000);
+          fallbackData.push({ timestamp: timestamp.toISOString(), status: 'no_data' });
+        }
+        
+        // Add current status as the most recent bar
+        fallbackData.push({ timestamp: currentTime.toISOString(), status: currentStatus });
+        
+        return fallbackData;
+      }
+    };
+
+    try {
+      const [apiBars, lambdaBars, ec2Bars, botBars] = await Promise.all([
+        fetchHistory('api'),
+        fetchHistory('lambda'),
+        fetchHistory('ec2'),
+        fetchHistory('bot'),
+      ]);
+
+      newServices.api = { ...newServices.api, uptimeData: apiBars };
+      newServices.lambda = { ...newServices.lambda, uptimeData: lambdaBars };
+      newServices.ec2 = { ...newServices.ec2, uptimeData: ec2Bars };
+      newServices.groupme = { ...newServices.groupme, uptimeData: botBars };
+    } catch (e) {
+      // Fallback: ensure all services have at least basic uptime data
+      const fallbackData = Array(totalBars).fill(null).map((_, i) => ({
+        timestamp: new Date(Date.now() - (totalBars - 1 - i) * 5 * 60 * 1000).toISOString(),
+        status: i === totalBars - 1 ? 'outage' : 'no_data' // Latest bar shows outage, others no data
+      }));
+      
+      newServices.api = { ...newServices.api, uptimeData: fallbackData };
+      newServices.lambda = { ...newServices.lambda, uptimeData: fallbackData };
+      newServices.ec2 = { ...newServices.ec2, uptimeData: fallbackData };
+      newServices.groupme = { ...newServices.groupme, uptimeData: fallbackData };
     }
 
     setServices(newServices);
     setLastUpdated(new Date());
     setLoading(false);
+    if (isManualRefresh) {
+      setRefreshing(false);
+    }
     servicesRef.current = newServices;
   }, []); // No dependencies needed now
 
@@ -241,75 +216,18 @@ const StatusPage = () => {
     }
   };
 
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'operational': return '🟢';
-      case 'degraded': return '🟡';
-      case 'outage': return '🔴';
-      case 'checking': return '🔵';
-      case 'unknown': return '⚪';
-      default: return '⚪';
-    }
-  };
+  
 
   const renderServiceDetails = (service) => {
-    
-    if (service.statsData) {
-      return (
-        <div className="mt-2 text-sm text-gray-600">
-          <p>Total predictions: {service.statsData.total_predictions || 'N/A'}</p>
-          <p>Accuracy: {service.statsData.accuracy || 'N/A'}</p>
-        </div>
-      );
-    }
-    
     if (service.instanceInfo) {
       return (
         <div className="mt-2 text-sm text-gray-600">
-          {service.instanceInfo.note && (
-            <p className="text-blue-600 italic">{service.instanceInfo.note}</p>
-          )}
           {service.instanceInfo.error && (
             <p className="text-red-600">Error: {service.instanceInfo.error}</p>
           )}
-          {service.instanceInfo.healthData && (
-            <div className="mt-2 p-2 bg-gray-100 rounded">
-              <p className="font-medium">System Health:</p>
-              <p>CPU: {service.instanceInfo.healthData.system_health?.cpu_percent || 'N/A'}%</p>
-              <p>Memory: {service.instanceInfo.healthData.system_health?.memory_percent || 'N/A'}%</p>
-              <p>Disk: {service.instanceInfo.healthData.system_health?.disk_percent || 'N/A'}%</p>
-              <p>Uptime: {Math.round((service.instanceInfo.healthData.uptime || 0) / 3600)} hours</p>
-            </div>
-          )}
         </div>
       );
     }
-    
-    if (service.botInfo) {
-      return (
-        <div className="mt-2 text-sm text-gray-600">
-          {service.botInfo.healthData && (
-            <div className="mt-2 p-2 bg-gray-100 rounded">
-              <p className="font-medium">Bot Details:</p>
-              <p>Group ID: 109638241 (Nest Run Club)</p>
-              <p>Confidence Threshold: 80%</p>
-              <p>Check Interval: 60 seconds</p>
-              {service.botInfo.healthData.bot_status?.processes && (
-                <div className="mt-2 pt-2 border-t border-gray-300">
-                  <p className="font-medium">Process Info:</p>
-                  {service.botInfo.healthData.bot_status.processes.map((proc, index) => (
-                    <div key={index} className="text-xs">
-                      <p>PID: {proc.pid} | CPU: {proc.cpu_percent}% | Memory: {proc.memory_percent}%</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      );
-    }
-    
     return null;
   };
 
@@ -355,10 +273,13 @@ const StatusPage = () => {
             Uptime over the past 45 hours (30-minute periods). Recent bars show current status, grey bars indicate no historical data available yet.
           </p>
           <button 
-            onClick={checkServiceHealth}
-            className="mt-2 text-sm italic text-blue-600 hover:text-blue-800 underline"
+            onClick={() => checkServiceHealth(true)}
+            disabled={refreshing}
+            className={`mt-2 text-sm italic text-blue-600 hover:text-blue-800 underline transition-opacity ${
+              refreshing ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
           >
-            Refresh Status Now
+            {refreshing ? '🔄 Refreshing...' : 'Refresh Status Now'}
           </button>
         </div>
 
@@ -375,21 +296,20 @@ const StatusPage = () => {
                 </div>
                 <div className="flex items-center space-x-2">
                   <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBackground(service.status)} ${getStatusColor(service.status)}`}>
-                    {getStatusIcon(service.status)} {service.status.charAt(0).toUpperCase() + service.status.slice(1)}
+                    {service.status.charAt(0).toUpperCase() + service.status.slice(1)}
                   </span>
                 </div>
               </div>
               
               {renderServiceDetails(service)}
               
-              {/* Uptime Bars */}
-              {service.uptimeData && (
-                <UptimeBars 
-                  uptimeData={service.uptimeData} 
-                  days={90} 
-                  serviceName={service.name}
-                />
-              )}
+              {/* Uptime Bars - Always show */}
+              <UptimeBars 
+                uptimeData={service.uptimeData || []} 
+                days={90} 
+                serviceName={service.name}
+                currentStatus={service.status}
+              />
               
               <div className="mt-4">
                 <div className="flex justify-between items-center">
@@ -405,23 +325,7 @@ const StatusPage = () => {
           ))}
         </div>
 
-        {/* Additional Info */}
-        <div className="mt-12 bg-gray-50 rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">System Information</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-gray-600">
-            <div>
-              <p><span className="font-medium">Region:</span> us-east-1 (N. Virginia)</p>
-              <p><span className="font-medium">Instance Type:</span> t2.micro</p>
-              <p><span className="font-medium">Monitoring:</span> Real-time (15 min intervals)</p>
-            </div>
-            <div>
-              <p><span className="font-medium">Lambda Memory:</span> 1024 MB</p>
-              <p><span className="font-medium">Lambda Timeout:</span> 30 seconds</p>
-              <p><span className="font-medium">Last Health Check:</span> {lastUpdated.toLocaleTimeString()}</p>
-              <p><span className="font-medium">Overall Status:</span> {isAllOperational ? 'Healthy' : 'Needs Attention'}</p>
-            </div>
-          </div>
-        </div>
+        {/* Additional Info section removed to avoid hardcoded values */}
       </div>
       
       <Footer />

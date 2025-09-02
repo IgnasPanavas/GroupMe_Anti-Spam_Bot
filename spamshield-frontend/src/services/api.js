@@ -49,6 +49,10 @@ export const apiService = {
 
   // Model Status
   getModelStatus: () => api.get('/model-status'),
+
+  // Uptime history (proxied via API Gateway to EC2 health server)
+  getUptimeHistory: (params = {}) => api.get('/uptime-history', { params }),
+  postUptimeRecord: ({ service, status, details }) => api.post('/uptime-history', { service, status, details }),
 };
 
 export default apiService;

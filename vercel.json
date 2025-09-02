@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "build",
-  "installCommand": "npm install --legacy-peer-deps"
+  "buildCommand": "cd spamshield-frontend && npm run build",
+  "outputDirectory": "spamshield-frontend/build",
+  "installCommand": "cd spamshield-frontend && npm install --legacy-peer-deps",
 }

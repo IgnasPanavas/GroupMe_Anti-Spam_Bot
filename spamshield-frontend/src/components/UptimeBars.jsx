@@ -1,118 +1,150 @@
 import React from 'react';
 
-const UptimeBars = ({ uptimeData, days = 90, serviceName }) => {
-  // Calculate uptime percentage based on available data
-  const calculateUptimePercentage = () => {
-    if (!uptimeData || !uptimeData.length) return null;
-    
-    // Only count periods with actual data (not 'no_data')
+/**
+ * A component to display a series of uptime bars representing the last 7.5 hours.
+ * It creates a sliding window of 90 bars, where each bar represents a 5-minute interval.
+ *
+ * @param {object} props - The component props.
+ * @param {Array<object>} props.uptimeData - Array of uptime status objects, e.g., { timestamp: 'ISO_STRING', status: 'operational' }.
+ * @param {string} props.serviceName - The name of the service being monitored.
+ */
+const UptimeBars = ({ uptimeData }) => {
+
+  // --- Uptime Percentage Calculation ---
+  // We wrap this in useMemo so it only recalculates when uptimeData changes.
+  const uptimePercentage = React.useMemo(() => {
+    if (!uptimeData || uptimeData.length === 0) return null;
+
     const periodsWithData = uptimeData.filter(period => period.status !== 'no_data');
     if (periodsWithData.length === 0) return null;
-    
+
     const operationalCount = periodsWithData.filter(period => period.status === 'operational').length;
     return ((operationalCount / periodsWithData.length) * 100).toFixed(2);
-  };
+  }, [uptimeData]);
 
-  // Generate bars based on real data or show grey for no data
-  const generateBars = () => {
-    const bars = [];
-    
-    // Exactly 90 bars representing 30-minute intervals
-    const totalBars = 90;
-    
-    for (let i = 0; i < totalBars; i++) {
-      let barColor = 'bg-gray-300'; // Default grey for no data
-      let tooltip = `Period ${i + 1}: No data`;
-      
-      if (uptimeData && uptimeData[i]) {
-        const periodData = uptimeData[i];
-        switch (periodData.status) {
-          case 'operational':
-            barColor = 'bg-green-500';
-            tooltip = `Period ${i + 1}: Operational`;
-            break;
-          case 'degraded':
-            barColor = 'bg-yellow-500';
-            tooltip = `Period ${i + 1}: Degraded`;
-            break;
-          case 'outage':
-            barColor = 'bg-red-500';
-            tooltip = `Period ${i + 1}: Outage`;
-            break;
-          case 'checking':
-            barColor = 'bg-blue-500';
-            tooltip = `Period ${i + 1}: Checking`;
-            break;
-          case 'no_data':
-            barColor = 'bg-gray-300';
-            tooltip = `Period ${i + 1}: No historical data available`;
-            break;
-          default:
-            barColor = 'bg-gray-300';
-            tooltip = `Period ${i + 1}: No data available`;
+  // --- Bar Generation Logic ---
+  // This is the core logic for creating the bars. It's wrapped in useMemo for performance.
+  // It will only run when the uptimeData prop changes.
+  const memoizedBars = React.useMemo(() => {
+    const totalBars = 90; // Represents 90 * 5 minutes = 7.5 hours
+    const data = Array.isArray(uptimeData) ? uptimeData : [];
+
+    // --- 1. Compress raw data into 5-minute intervals ---
+    const compressedData = [];
+    if (data.length > 0) {
+      // Ensure data is sorted oldest to newest before processing.
+      const sortedData = [...data].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+      let intervalStartTime = null;
+      let intervalWorstStatus = null;
+      const statusPriority = { 'outage': 3, 'degraded': 2, 'operational': 1, 'checking': 0, 'no_data': -1 };
+
+      for (const record of sortedData) {
+        const recordTime = new Date(record.timestamp);
+
+        if (!intervalStartTime) {
+          intervalStartTime = recordTime;
+          intervalWorstStatus = record.status;
+        } else {
+          const diffMinutes = (recordTime - intervalStartTime) / (1000 * 60);
+
+          if (diffMinutes >= 5) {
+            compressedData.push({
+              timestamp: intervalStartTime.toISOString(),
+              status: intervalWorstStatus,
+            });
+            intervalStartTime = recordTime;
+            intervalWorstStatus = record.status;
+          } else {
+            if (statusPriority[record.status] > statusPriority[intervalWorstStatus]) {
+              intervalWorstStatus = record.status;
+            }
+          }
         }
       }
-      
-      bars.push(
+
+      if (intervalStartTime) {
+        compressedData.push({
+          timestamp: intervalStartTime.toISOString(),
+          status: intervalWorstStatus,
+        });
+      }
+    }
+
+    // --- 2. Build the Timeline ---
+    const recentData = compressedData.slice(-totalBars);
+    const paddingCount = totalBars - recentData.length;
+    const paddingBars = Array.from({ length: paddingCount }, (_, i) => ({
+      id: `pad-${i}`,
+      status: 'no_data',
+      tooltip: 'No historical data available',
+    }));
+    const dataBars = recentData.map(d => ({
+      id: d.timestamp,
+      status: d.status,
+      tooltip: `${d.status.charAt(0).toUpperCase() + d.status.slice(1)} at ${new Date(d.timestamp).toLocaleTimeString()}`
+    }));
+    const timeline = [...paddingBars, ...dataBars];
+
+    // --- 3. Render the JSX Bars ---
+    return timeline.map(barData => {
+      let barColor = 'bg-gray-300'; // Default for 'no_data'
+      switch (barData.status) {
+        case 'operational': barColor = 'bg-green-500'; break;
+        case 'degraded': barColor = 'bg-yellow-500'; break;
+        case 'outage': barColor = 'bg-red-500'; break;
+        case 'checking': barColor = 'bg-blue-500'; break;
+        default: break;
+      }
+
+      return (
         <div
-          key={i}
+          key={barData.id}
           className={`w-1 h-4 ${barColor} rounded-sm mx-px transition-colors duration-200 hover:opacity-80`}
-          title={tooltip}
+          title={barData.tooltip}
         />
       );
-    }
-    
-    return bars;
-  };
+    });
+  }, [uptimeData]);
 
-  const uptimePercentage = calculateUptimePercentage();
+  const periodsWithDataCount = uptimeData ? uptimeData.filter(period => period.status !== 'no_data').length : 0;
 
   return (
     <div className="mt-4">
-              <div className="flex items-center justify-between mb-2">
-          {uptimePercentage !== null ? (
-            <span className={`text-sm font-semibold ${
-              uptimePercentage >= 99.9 ? 'text-green-600' :
-              uptimePercentage >= 99.0 ? 'text-yellow-600' :
-              'text-red-600'
-            }`}>
-              {uptimePercentage}% uptime
-            </span>
-          ) : (
-            <span className="text-sm font-semibold text-gray-500">
-              {/* Insufficient data moved to right side */}
-            </span>
-          )}
-        </div>
+      <div className="flex items-center justify-between mb-2">
+        {uptimePercentage !== null ? (
+          <span className={`text-sm font-semibold ${
+            uptimePercentage >= 99.9 ? 'text-green-600' :
+            uptimePercentage >= 99.0 ? 'text-yellow-600' :
+            'text-red-600'
+          }`}>
+            {uptimePercentage}% uptime
+          </span>
+        ) : (
+          <span className="text-sm font-semibold text-gray-500">
+            {/* Insufficient data text is shown on the right side */}
+          </span>
+        )}
+      </div>
       
       <div className="flex items-center space-x-4">
         {/* Bars on the left */}
         <div className="flex-1">
           <div className="flex items-center space-x-px mb-2">
-            {generateBars()}
+            {memoizedBars}
           </div>
           
           <div className="flex justify-between text-xs text-gray-500">
-            <span>45 hours ago</span>
+            <span>7.5 hours ago</span>
+            
           </div>
         </div>
         
-        {/* Text info on the right */}
-        <div className="flex-shrink-0 w-48 text-right flex flex-col justify-center">
-          {uptimePercentage === null && (
-            <>
-              <div className="text-sm font-semibold text-gray-500 mb-2">
-                Insufficient data
-              </div>
-              <div className="text-xs text-gray-400 mb-2">
-                {uptimeData ? uptimeData.filter(period => period.status !== 'no_data').length : 0} of 90 periods available
-              </div>
-            </>
-          )}
-        </div>
+        
       </div>
     </div>
   );
 };
 
 export default UptimeBars;
+
