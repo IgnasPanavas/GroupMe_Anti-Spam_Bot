@@ -283,13 +283,21 @@ class BotOrchestrator:
     
     def _assignment_loop(self):
         """Background thread for managing group assignments"""
-        while self.running and not self.shutdown_event.is_set():
-            try:
-                asyncio.create_task(self._assign_groups())
-                time.sleep(120)  # Check assignments every 2 minutes
-            except Exception as e:
-                logger.error(f"Assignment loop error: {e}")
-                time.sleep(30)
+        # Create a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            while self.running and not self.shutdown_event.is_set():
+                try:
+                    # Run the async assignment function
+                    loop.run_until_complete(self._assign_groups())
+                    time.sleep(120)  # Check assignments every 2 minutes
+                except Exception as e:
+                    logger.error(f"Assignment loop error: {e}")
+                    time.sleep(30)
+        finally:
+            loop.close()
     
     async def _assign_groups(self):
         """Assign groups to worker processes based on load balancing"""

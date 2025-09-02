@@ -166,7 +166,7 @@ class SpamMonitorWorker:
                 
                 # Wait for next cycle (minimum interval across all groups)
                 min_interval = min(
-                    (monitor.config.check_interval_seconds for monitor in self.group_monitors.values()),
+                    (monitor.config_values['check_interval_seconds'] for monitor in self.group_monitors.values()),
                     default=30
                 )
                 await asyncio.sleep(min_interval)
@@ -243,7 +243,17 @@ class GroupMonitor:
             metrics_collector: Metrics collector instance
         """
         self.group = group
-        self.config = config
+        self.group_id = group.group_id
+        # Store config values instead of the SQLAlchemy object
+        self.config_values = {
+            'send_startup_message': config.send_startup_message,
+            'confidence_threshold': config.confidence_threshold,
+            'auto_delete_spam': config.auto_delete_spam,
+            'notify_on_removal': config.notify_on_removal,
+            'notify_admins': config.notify_admins,
+            'whitelist_users': config.whitelist_users or [],
+            'check_interval_seconds': config.check_interval_seconds
+        }
         self.model = model
         self.vectorizer = vectorizer
         self.model_version = model_version
@@ -270,7 +280,7 @@ class GroupMonitor:
         """Initialize the group monitor"""
         try:
             # Send startup message if configured
-            if self.config.send_startup_message:
+            if self.config_values['send_startup_message']:
                 await self._send_startup_message()
             
             # Load recent message IDs to avoid reprocessing
@@ -343,7 +353,7 @@ class GroupMonitor:
             message_created_at = datetime.fromtimestamp(message.get('created_at', time.time()))
             
             # Check if user is whitelisted
-            if sender_id in (self.config.whitelist_users or []):
+            if sender_id in self.config_values['whitelist_users']:
                 logger.debug(f"Skipping whitelisted user {sender_name}")
                 self.processed_messages.add(message_id)
                 return True
@@ -421,7 +431,7 @@ class GroupMonitor:
             else:
                 confidence = probabilities[0]
             
-            is_spam = prediction == 'spam' and confidence >= float(self.config.confidence_threshold)
+            is_spam = prediction == 'spam' and confidence >= float(self.config_values['confidence_threshold'])
             
             return is_spam, float(confidence)
             
@@ -458,22 +468,22 @@ class GroupMonitor:
             notification_sent = False
             
             # Try to delete the message if configured
-            if self.config.auto_delete_spam:
+            if self.config_values['auto_delete_spam']:
                 if await self._delete_message(message_id):
                     action_taken = "deleted"
                     deletion_successful = True
                     self.spam_deleted += 1
                     
                     # Send removal notification if configured
-                    if self.config.notify_on_removal:
+                    if self.config_values['notify_on_removal']:
                         notification_sent = await self._send_removal_notification(sender_name)
                 else:
                     # If deletion failed, send spam alert
-                    if self.config.notify_admins:
+                    if self.config_values['notify_admins']:
                         notification_sent = await self._send_spam_alert(message, confidence)
             else:
                 # Just send alert without deleting
-                if self.config.notify_admins:
+                if self.config_values['notify_admins']:
                     notification_sent = await self._send_spam_alert(message, confidence)
             
             # Update message log with action results
