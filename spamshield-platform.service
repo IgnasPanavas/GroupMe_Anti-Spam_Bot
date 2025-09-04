@@ -1,0 +1,27 @@
+[Unit]
+Description=SpamShield Platform Service
+After=network.target
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/GroupMe_Anti-Spam_Bot
+Environment=PATH=/home/ubuntu/GroupMe_Anti-Spam_Bot/venv/bin
+Environment=PYTHONPATH=/home/ubuntu/GroupMe_Anti-Spam_Bot
+ExecStart=/home/ubuntu/GroupMe_Anti-Spam_Bot/venv/bin/python spamshield_platform/main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=spamshield-platform
+
+# Resource limits
+LimitNOFILE=65536
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/GroupMe_Anti-Spam_Bot/spamshield_platform/logs
+
+[Install]
+WantedBy=multi-user.target

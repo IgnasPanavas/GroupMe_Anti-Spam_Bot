@@ -1,65 +1,390 @@
 import json
 import os
-import sys
-from datetime import datetime
 import boto3
 import csv
 import io
+from datetime import datetime
 
 def lambda_handler(event, context):
-    """Lambda handler focused on status monitoring endpoints"""
-    print(f"Status Lambda invoked with event: {event}")
-    print(f"Context: {context}")
+    """Comprehensive Lambda handler for all SpamShield API endpoints"""
     
     try:
-        # Parse the event - handle both direct invocation and API Gateway
-        if 'httpMethod' in event:
-            # Direct invocation
-            http_method = event.get('httpMethod', 'GET')
-            path = event.get('path', '/')
-        else:
-            # API Gateway invocation
-            http_method = event.get('httpMethod', 'GET')
-            path = event.get('path', '/')
-            # Handle proxy path
-            if 'pathParameters' in event and event['pathParameters'] and 'proxy' in event['pathParameters']:
-                path = '/' + event['pathParameters']['proxy']
+        # Parse the event
+        http_method = event.get('httpMethod', 'GET')
+        path = event.get('path', '/')
         
-        # Debug logging for path parsing
-        print(f"DEBUG: Event keys: {list(event.keys())}")
+        # Debug logging
+        print(f"DEBUG: Event received: {json.dumps(event, indent=2)}")
         print(f"DEBUG: httpMethod: {http_method}")
         print(f"DEBUG: path: {path}")
         print(f"DEBUG: rawPath: {event.get('rawPath', 'N/A')}")
-        print(f"DEBUG: requestContext: {event.get('requestContext', {}).get('path', 'N/A')}")
-        
-        # Try alternative path extraction methods
-        if not path or path == '/':
-            # Try rawPath (newer API Gateway format)
-            if 'rawPath' in event:
-                path = event['rawPath']
-            # Try requestContext path
-            elif 'requestContext' in event and 'path' in event['requestContext']:
-                path = event['requestContext']['path']
-            # Try resource path
-            elif 'resource' in event:
-                path = event['resource']
+        print(f"DEBUG: requestContext path: {event.get('requestContext', {}).get('path', 'N/A')}")
         
         # Handle OPTIONS requests for CORS
         if http_method == 'OPTIONS':
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                },
-                'body': json.dumps({'message': 'CORS preflight successful'})
-            }
+            return cors_response(200, {'message': 'CORS preflight successful'})
         
-        # Handle different endpoints
-        if path == '/stats' or path.endswith('/stats'):
-            # Return stats data that your frontend expects
+        # Route to appropriate handler based on path
+        if path in ['/fast/status-summary', '/status-summary'] or 'status-summary' in path:
+            return handle_status_summary()
+        elif path in ['/uptime-history'] or 'uptime-history' in path:
+            return handle_uptime_history(event, http_method)
+        elif path in ['/bot-status'] or 'bot-status' in path:
+            return handle_bot_status()
+        elif path in ['/stats'] or 'stats' in path:
+            return handle_stats()
+        elif path in ['/ec2-status'] or 'ec2-status' in path:
+            return handle_ec2_status()
+        elif path in ['/health'] or 'health' in path:
+            return cors_response(200, {
+                'status': 'healthy', 
+                'message': 'SpamShield API is running',
+                'service': 'comprehensive-api'
+            })
+        else:
+            return cors_response(200, {
+                'message': 'SpamShield API',
+                'status': 'working',
+                'path': path,
+                'service': 'comprehensive-api',
+                'available_endpoints': [
+                    '/status-summary',
+                    '/fast/status-summary', 
+                    '/uptime-history',
+                    '/bot-status',
+                    '/stats',
+                    '/ec2-status',
+                    '/health'
+                ]
+            })
+            
+    except Exception as e:
+        print(f"Error in lambda_handler: {e}")
+        return cors_response(500, {
+            'error': 'Internal server error', 
+            'details': str(e)
+        })
+
+def handle_status_summary():
+    """Get latest status for all services from S3 logs"""
+    try:
+        s3_bucket = os.environ.get('UPTIME_S3_BUCKET', 'spamshield-uptime-545009842663-us-east-1')
+        s3_client = boto3.client('s3', region_name='us-east-1')
+        
+        try:
+            # Read uptime history from S3
+            response = s3_client.get_object(Bucket=s3_bucket, Key='uptime_history.csv')
+            csv_content = response['Body'].read().decode('utf-8')
+            
+            # Parse CSV and get latest status for each service
+            services = {}
+            csv_reader = csv.DictReader(io.StringIO(csv_content))
+            for row in csv_reader:
+                service = row['service']
+                timestamp = row['timestamp']
+                
+                # Keep the most recent record for each service
+                if service not in services or timestamp > services[service]['timestamp']:
+                    try:
+                        details = json.loads(row['details']) if row['details'] else {}
+                    except:
+                        details = {}
+                    
+                    services[service] = {
+                        'timestamp': timestamp,
+                        'status': row['status'],
+                        'details': details
+                    }
+            
+            # Format response
+            status_summary = {
+                'api': {
+                    'status': services.get('api', {}).get('status', 'unknown'),
+                    'lastCheck': services.get('api', {}).get('timestamp'),
+                    'response_time': services.get('api', {}).get('details', {}).get('response_time'),
+                    'status_code': services.get('api', {}).get('details', {}).get('status_code')
+                },
+                'lambda': {
+                    'status': services.get('lambda', {}).get('status', 'unknown'),
+                    'lastCheck': services.get('lambda', {}).get('timestamp'),
+                    'response_time': services.get('lambda', {}).get('details', {}).get('response_time'),
+                    'status_code': services.get('lambda', {}).get('details', {}).get('status_code')
+                },
+                'ec2': {
+                    'status': services.get('ec2', {}).get('status', 'unknown'),
+                    'lastCheck': services.get('ec2', {}).get('timestamp'),
+                    'state': services.get('ec2', {}).get('details', {}).get('state'),
+                    'instance_id': services.get('ec2', {}).get('details', {}).get('instance_id'),
+                    'public_ip': services.get('ec2', {}).get('details', {}).get('public_ip')
+                },
+                'bot': {
+                    'status': services.get('bot', {}).get('status', 'unknown'),
+                    'lastCheck': services.get('bot', {}).get('timestamp'),
+                    'platform_status': services.get('bot', {}).get('details', {}).get('platform_status'),
+                    'total_groups': services.get('bot', {}).get('details', {}).get('total_groups'),
+                    'active_groups': services.get('bot', {}).get('details', {}).get('active_groups'),
+                    'workers': services.get('bot', {}).get('details', {}).get('workers')
+                },
+                'last_updated': datetime.now().isoformat(),
+                'data_source': 'uptime_logs'
+            }
+            
+            return cors_response(200, status_summary)
+            
+        except s3_client.exceptions.NoSuchKey:
+            # No data yet, return default status
+            return cors_response(200, {
+                'api': {'status': 'no_data', 'lastCheck': None},
+                'lambda': {'status': 'no_data', 'lastCheck': None},
+                'ec2': {'status': 'no_data', 'lastCheck': None},
+                'bot': {'status': 'no_data', 'lastCheck': None},
+                'last_updated': datetime.now().isoformat(),
+                'data_source': 'uptime_logs'
+            })
+            
+    except Exception as e:
+        print(f"Error in status summary: {e}")
+        return cors_response(500, {'error': f'Status summary error: {str(e)}'})
+
+def handle_uptime_history(event, http_method):
+    """Handle uptime history requests"""
+    try:
+        s3_bucket = os.environ.get('UPTIME_S3_BUCKET', 'spamshield-uptime-545009842663-us-east-1')
+        s3_client = boto3.client('s3', region_name='us-east-1')
+        
+        if http_method == 'GET':
+            # Read uptime history
+            query_params = event.get('queryStringParameters', {}) or {}
+            service = query_params.get('service', 'all')
+            minutes = int(query_params.get('minutes', 2880))  # Default 48 hours
+            limit = int(query_params.get('limit', 180))  # Default 180 records
+            
+            try:
+                response = s3_client.get_object(Bucket=s3_bucket, Key='uptime_history.csv')
+                csv_content = response['Body'].read().decode('utf-8')
+                
+                # Parse and filter records
+                records = []
+                csv_reader = csv.DictReader(io.StringIO(csv_content))
+                for row in csv_reader:
+                    if service == 'all' or row['service'] == service:
+                        records.append(row)
+                
+                # Filter by time
+                from datetime import timedelta
+                cutoff_time = datetime.now() - timedelta(minutes=minutes)
+                filtered_records = []
+                for record in records:
+                    try:
+                        record_time = datetime.fromisoformat(record['timestamp'])
+                        if record_time >= cutoff_time:
+                            filtered_records.append(record)
+                    except:
+                        continue
+                
+                # Sort by timestamp (newest first) and limit
+                filtered_records.sort(key=lambda x: x['timestamp'], reverse=True)
+                filtered_records = filtered_records[:limit]
+                
+                return cors_response(200, {
+                    'minutes': minutes,
+                    'limit': limit,
+                    'service': service,
+                    'records': filtered_records
+                })
+                
+            except s3_client.exceptions.NoSuchKey:
+                return cors_response(200, {
+                    'minutes': minutes,
+                    'limit': limit,
+                    'service': service,
+                    'records': []
+                })
+        
+        elif http_method == 'POST':
+            # Add new uptime record (for the uptime monitor Lambda)
+            body = event.get('body', '{}')
+            if not body:
+                return cors_response(400, {'error': 'No data provided'})
+            
+            try:
+                record_data = json.loads(body) if isinstance(body, str) else body
+                
+                # Validate required fields
+                required_fields = ['service', 'status']
+                for field in required_fields:
+                    if field not in record_data:
+                        return cors_response(400, {'error': f'Missing required field: {field}'})
+                
+                # Auto-generate timestamp if not provided
+                if 'timestamp' not in record_data:
+                    record_data['timestamp'] = datetime.now().isoformat()
+                
+                # Read existing data
+                existing_records = []
+                try:
+                    response = s3_client.get_object(Bucket=s3_bucket, Key='uptime_history.csv')
+                    csv_content = response['Body'].read().decode('utf-8')
+                    csv_reader = csv.DictReader(io.StringIO(csv_content))
+                    existing_records = list(csv_reader)
+                except s3_client.exceptions.NoSuchKey:
+                    existing_records = []
+                
+                # Add new record
+                new_record = {
+                    'timestamp': record_data['timestamp'],
+                    'service': record_data['service'],
+                    'status': record_data['status'],
+                    'details': record_data.get('details', '{}')
+                }
+                existing_records.append(new_record)
+                
+                # Write back to S3
+                csv_buffer = io.StringIO()
+                fieldnames = ['timestamp', 'service', 'status', 'details']
+                csv_writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames, extrasaction='ignore')
+                csv_writer.writeheader()
+                csv_writer.writerows(existing_records)
+                
+                s3_client.put_object(
+                    Bucket=s3_bucket,
+                    Key='uptime_history.csv',
+                    Body=csv_buffer.getvalue(),
+                    ContentType='text/csv'
+                )
+                
+                return cors_response(200, {'ok': True, 'message': 'Uptime record added'})
+                
+            except Exception as e:
+                return cors_response(500, {'ok': False, 'error': str(e)})
+        
+        else:
+            return cors_response(405, {'error': 'Method not allowed', 'allowed_methods': ['GET', 'POST']})
+            
+    except Exception as e:
+        print(f"Error in uptime history: {e}")
+        return cors_response(500, {'error': f'Uptime history error: {str(e)}'})
+
+def handle_bot_status():
+    """Check SpamShield Platform status on EC2"""
+    try:
+        ssm_client = boto3.client('ssm', region_name='us-east-1')
+        
+        # Check platform status
+        command = "cd /home/ubuntu/GroupMe_Anti-Spam_Bot && ./manage_platform.sh status"
+        response = ssm_client.send_command(
+            InstanceIds=['i-0a0001f601291b280'],
+            DocumentName='AWS-RunShellScript',
+            Parameters={'commands': [command]},
+            TimeoutSeconds=30
+        )
+        
+        command_id = response['Command']['CommandId']
+        
+        # Wait for command completion
+        import time
+        for _ in range(10):
+            time.sleep(1)
+            output = ssm_client.get_command_invocation(
+                CommandId=command_id,
+                InstanceId='i-0a0001f601291b280'
+            )
+            if output['Status'] in ['Success', 'Failed', 'Cancelled', 'TimedOut']:
+                break
+        
+        # Parse platform status
+        status_output = output.get('StandardOutputContent', '').strip()
+        is_active = 'is running' in status_output and 'Health check: ✅ PASSED' in status_output
+        
+        # Extract PID
+        pid = 'unknown'
+        if 'PID:' in status_output:
+            try:
+                pid = status_output.split('PID: ')[1].split(')')[0]
+            except:
+                pass
+        
+        # Get additional platform info
+        health_command = "curl -s http://localhost:8000/health"
+        health_response = ssm_client.send_command(
+            InstanceIds=['i-0a0001f601291b280'],
+            DocumentName='AWS-RunShellScript',
+            Parameters={'commands': [health_command]},
+            TimeoutSeconds=30
+        )
+        
+        health_command_id = health_response['Command']['CommandId']
+        time.sleep(2)
+        
+        health_output = ssm_client.get_command_invocation(
+            CommandId=health_command_id,
+            InstanceId='i-0a0001f601291b280'
+        )
+        
+        # Parse health data
+        health_data = {}
+        try:
+            health_json = health_output.get('StandardOutputContent', '{}')
+            health_data = json.loads(health_json)
+        except:
+            pass
+        
+        # Get groups count
+        groups_command = "curl -s http://localhost:8000/api/v1/groups/"
+        groups_response = ssm_client.send_command(
+            InstanceIds=['i-0a0001f601291b280'],
+            DocumentName='AWS-RunShellScript',
+            Parameters={'commands': [groups_command]},
+            TimeoutSeconds=30
+        )
+        
+        groups_command_id = groups_response['Command']['CommandId']
+        time.sleep(2)
+        
+        groups_output = ssm_client.get_command_invocation(
+            CommandId=groups_command_id,
+            InstanceId='i-0a0001f601291b280'
+        )
+        
+        groups_data = {}
+        try:
+            groups_json = groups_output.get('StandardOutputContent', '{}')
+            groups_data = json.loads(groups_json)
+        except:
+            pass
+        
+        bot_data = {
+            "active": is_active,
+            "status": "operational" if is_active else "outage",
+            "platform_status": "running" if is_active else "stopped",
+            "main_pid": pid,
+            "health_status": health_data.get('status', 'unknown'),
+            "orchestrator_running": health_data.get('orchestrator', {}).get('running', False),
+            "total_groups": groups_data.get('total_count', 0),
+            "active_groups": groups_data.get('active_count', 0),
+            "workers": len(health_data.get('orchestrator', {}).get('workers', {})),
+            "database_status": health_data.get('components', {}).get('database', 'unknown'),
+            "metrics_status": health_data.get('components', {}).get('metrics_collector', 'unknown'),
+            "last_checked": datetime.now().isoformat(),
+            "note": "Real-time SpamShield Platform status from EC2",
+            "service_type": "spamshield_platform"
+        }
+        
+        return cors_response(200, bot_data)
+        
+    except Exception as e:
+        print(f"Error checking bot status: {e}")
+        return cors_response(200, {
+            "active": False,
+            "status": "outage",
+            "error": f"Platform check failed: {str(e)}",
+            "last_checked": datetime.now().isoformat(),
+            "note": "Fallback status due to platform check error",
+            "service_type": "spamshield_platform"
+        })
+
+def handle_stats():
+    """Return stats data for the frontend"""
             stats_data = {
                 "total_messages": 1250,
                 "spam_detected": 45,
@@ -67,23 +392,14 @@ def lambda_handler(event, context):
                 "total_predictions": 1250,
                 "groups_monitored": 8,
                 "last_updated": datetime.now().isoformat(),
-                "status": "active"
-            }
-            
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                },
-                'body': json.dumps(stats_data)
-            }
-        
-        elif path == '/ec2-status' or path.endswith('/ec2-status'):
-            # Return comprehensive EC2 instance status using AWS SDK
-            try:
+        "status": "active"
+    }
+    
+    return cors_response(200, stats_data)
+
+def handle_ec2_status():
+    """Return comprehensive EC2 instance status"""
+    try:
                 ec2_client = boto3.client('ec2', region_name='us-east-1')
                 
                 # Get real instance status
@@ -112,7 +428,7 @@ def lambda_handler(event, context):
                         "state": instance['State']['Name'],
                         "publicIp": instance.get('PublicIpAddress', 'N/A'),
                         "instanceType": instance['InstanceType'],
-                        "region": instance['Placement']['AvailabilityZone'][:-1],  # Remove last character to get region
+                "region": instance['Placement']['AvailabilityZone'][:-1],
                         "launchTime": instance['LaunchTime'].isoformat(),
                         "lastChecked": datetime.now().isoformat(),
                         "statusCheck": "passed" if instance.get('StateReason', {}).get('Code') == 'User initiated (2015-01-01 00:00:00 UTC)' else "checking",
@@ -145,13 +461,15 @@ def lambda_handler(event, context):
                         "error": "Instance not found"
                     }
                 
+        return cors_response(200, ec2_data)
+        
             except Exception as e:
                 print(f"Error getting EC2 status: {e}")
                 # Fallback to basic info if AWS call fails
                 ec2_data = {
                     "instanceId": "i-0a0001f601291b280",
                     "state": "checking",
-                    "publicIp": "3.91.154.73",  # Updated to actual IP
+            "publicIp": "3.91.154.73",
                     "instanceType": "t2.micro",
                     "region": "us-east-1",
                     "launchTime": "2025-08-31T19:55:44+00:00",
@@ -162,364 +480,17 @@ def lambda_handler(event, context):
                     "error": str(e)
                 }
             
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                },
-                'body': json.dumps(ec2_data)
-            }
-        
-        elif path == '/uptime-history' or path.endswith('/uptime-history') or '/uptime-history' in path:
-            print(f"DEBUG: Matched uptime-history condition! path='{path}'")
-            # Handle uptime history requests
-            try:
-                from datetime import timedelta
-                
-                # Get S3 configuration
-                s3_bucket = os.environ.get('UPTIME_S3_BUCKET', 'spamshield-uptime-545009842663-us-east-1')
-                s3_client = boto3.client('s3', region_name='us-east-1')
-                
-                if http_method == 'GET':
-                    # Read uptime history
-                    query_params = event.get('queryStringParameters', {}) or {}
-                    service = query_params.get('service', 'all')
-                    minutes = int(query_params.get('minutes', 2880))  # Default 48 hours
-                    limit = int(query_params.get('limit', 180))  # Default 180 records
-                    
-                    try:
-                        # Try to read existing data
-                        response = s3_client.get_object(Bucket=s3_bucket, Key='uptime_history.csv')
-                        csv_content = response['Body'].read().decode('utf-8')
-                        
-                        # Parse CSV
-                        records = []
-                        csv_reader = csv.DictReader(io.StringIO(csv_content))
-                        for row in csv_reader:
-                            if service == 'all' or row['service'] == service:
-                                records.append(row)
-                        
-                        # Filter by time
-                        cutoff_time = datetime.now() - timedelta(minutes=minutes)
-                        filtered_records = []
-                        for record in records:
-                            try:
-                                record_time = datetime.fromisoformat(record['timestamp'])
-                                if record_time >= cutoff_time:
-                                    filtered_records.append(record)
-                            except:
-                                continue
-                        
-                        # Sort by timestamp (newest first) and limit
-                        filtered_records.sort(key=lambda x: x['timestamp'], reverse=True)
-                        filtered_records = filtered_records[:limit]
-                        
+        return cors_response(200, ec2_data)
+
+def cors_response(status_code, body):
+    """Helper function to create CORS-enabled responses"""
                         return {
-                            'statusCode': 200,
+        'statusCode': status_code,
                             'headers': {
                                 'Content-Type': 'application/json',
                                 'Access-Control-Allow-Origin': '*',
                                 'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
                                 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
                             },
-                            'body': json.dumps({
-                                'minutes': minutes,
-                                'limit': limit,
-                                'service': service,
-                                'records': filtered_records
-                            })
-                        }
-                        
-                    except s3_client.exceptions.NoSuchKey:
-                        # No data yet, return empty response
-                        return {
-                            'statusCode': 200,
-                            'headers': {
-                                'Content-Type': 'application/json',
-                                'Access-Control-Allow-Origin': '*',
-                                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                            },
-                            'body': json.dumps({
-                                'minutes': minutes,
-                                'limit': limit,
-                                'service': service,
-                                'records': []
-                            })
-                        }
-                
-                elif http_method == 'POST':
-                    # Add new uptime record
-                    body = event.get('body', '{}')
-                    if not body:
-                        return {
-                            'statusCode': 400,
-                            'headers': {
-                                'Content-Type': 'application/json',
-                                'Access-Control-Allow-Origin': '*',
-                                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                            },
-                            'body': json.dumps({'error': 'No data provided'})
-                        }
-                    
-                    try:
-                        # Parse request body
-                        if isinstance(body, str):
-                            record_data = json.loads(body)
-                        else:
-                            record_data = body
-                        
-                        # Validate required fields (timestamp is optional - will be auto-generated)
-                        required_fields = ['service', 'status']
-                        for field in required_fields:
-                            if field not in record_data:
-                                return {
-                                    'statusCode': 400,
-                                    'headers': {
-                                        'Content-Type': 'application/json',
-                                        'Access-Control-Allow-Origin': '*',
-                                        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                                        'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                                    },
-                                    'body': json.dumps({'error': f'Missing required field: {field}'})
-                                }
-                        
-                        # Auto-generate timestamp if not provided
-                        if 'timestamp' not in record_data:
-                            record_data['timestamp'] = datetime.now().isoformat()
-                        
-                        # Read existing data
-                        existing_records = []
-                        try:
-                            response = s3_client.get_object(Bucket=s3_bucket, Key='uptime_history.csv')
-                            csv_content = response['Body'].read().decode('utf-8')
-                            csv_reader = csv.DictReader(io.StringIO(csv_content))
-                            existing_records = list(csv_reader)
-                        except s3_client.exceptions.NoSuchKey:
-                            # Create new file with headers
-                            existing_records = []
-                        
-                        # Add new record
-                        new_record = {
-                            'timestamp': record_data['timestamp'],
-                            'service': record_data['service'],
-                            'status': record_data['status'],
-                            'details': record_data.get('details', '{}')
-                        }
-                        existing_records.append(new_record)
-                        
-                        # Write back to S3
-                        csv_buffer = io.StringIO()
-                        fieldnames = ['timestamp', 'service', 'status', 'details']
-                        csv_writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames, extrasaction='ignore')
-                        csv_writer.writeheader()
-                        csv_writer.writerows(existing_records)
-                        
-                        s3_client.put_object(
-                            Bucket=s3_bucket,
-                            Key='uptime_history.csv',
-                            Body=csv_buffer.getvalue(),
-                            ContentType='text/csv'
-                        )
-                        
-                        return {
-                            'statusCode': 200,
-                            'headers': {
-                                'Content-Type': 'application/json',
-                                'Access-Control-Allow-Origin': '*',
-                                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                            },
-                            'body': json.dumps({'ok': True, 'message': 'Uptime record added'})
-                        }
-                        
-                    except Exception as e:
-                        return {
-                            'statusCode': 500,
-                            'headers': {
-                                'Content-Type': 'application/json',
-                                'Access-Control-Allow-Origin': '*',
-                                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                            },
-                            'body': json.dumps({'ok': False, 'error': str(e)})
-                        }
-                
-                else:
-                    return {
-                        'statusCode': 405,
-                        'headers': {
-                            'Content-Type': 'application/json',
-                            'Access-Control-Allow-Origin': '*',
-                            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                        },
-                        'body': json.dumps({'error': 'Method not allowed', 'allowed_methods': ['GET', 'POST']})
-                    }
-                    
-            except Exception as e:
-                print(f"Error in uptime-history endpoint: {e}")
-                return {
-                    'statusCode': 500,
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                        'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                    },
-                    'body': json.dumps({'error': f'Internal server error: {str(e)}'})
-                }
-        
-        elif path == '/bot-status' or path.endswith('/bot-status'):
-            # Check actual GroupMe bot systemd service status on EC2
-            try:
-                # Use AWS Systems Manager to run command on EC2 instance
-                ssm_client = boto3.client('ssm', region_name='us-east-1')
-                
-                # Command to check systemd service status
-                command = "systemctl is-active groupme-bot.service"
-                
-                response = ssm_client.send_command(
-                    InstanceIds=['i-0a0001f601291b280'],
-                    DocumentName='AWS-RunShellScript',
-                    Parameters={'commands': [command]},
-                    TimeoutSeconds=30
-                )
-                
-                command_id = response['Command']['CommandId']
-                
-                # Wait for command completion and get result
-                import time
-                for _ in range(10):  # Wait up to 10 seconds
-                    time.sleep(1)
-                    output = ssm_client.get_command_invocation(
-                        CommandId=command_id,
-                        InstanceId='i-0a0001f601291b280'
-                    )
-                    if output['Status'] in ['Success', 'Failed', 'Cancelled', 'TimedOut']:
-                        break
-                
-                service_status = output.get('StandardOutputContent', '').strip()
-                is_active = service_status == 'active'
-                
-                # Get additional service info
-                info_command = "systemctl show groupme-bot.service --property=ActiveState,SubState,LoadState,UnitFileState,MainPID,MemoryCurrent"
-                info_response = ssm_client.send_command(
-                    InstanceIds=['i-0a0001f601291b280'],
-                    DocumentName='AWS-RunShellScript',
-                    Parameters={'commands': [info_command]},
-                    TimeoutSeconds=30
-                )
-                
-                info_command_id = info_response['Command']['CommandId']
-                time.sleep(2)  # Brief wait for command completion
-                
-                info_output = ssm_client.get_command_invocation(
-                    CommandId=info_command_id,
-                    InstanceId='i-0a0001f601291b280'
-                )
-                
-                service_info = info_output.get('StandardOutputContent', '')
-                
-                # Parse service info
-                info_lines = service_info.strip().split('\n')
-                service_details = {}
-                for line in info_lines:
-                    if '=' in line:
-                        key, value = line.split('=', 1)
-                        service_details[key] = value
-                
-                bot_data = {
-                    "active": is_active,
-                    "status": "operational" if is_active else "outage",
-                    "service_status": service_status,
-                    "active_state": service_details.get('ActiveState', 'unknown'),
-                    "sub_state": service_details.get('SubState', 'unknown'),
-                    "load_state": service_details.get('LoadState', 'unknown'),
-                    "unit_file_state": service_details.get('UnitFileState', 'unknown'),
-                    "main_pid": service_details.get('MainPID', 'unknown'),
-                    "memory_usage": service_details.get('MemoryCurrent', 'unknown'),
-                    "last_checked": datetime.now().isoformat(),
-                    "note": "Real-time systemd service status from EC2"
-                }
-                
-            except Exception as e:
-                print(f"Error checking bot status: {e}")
-                # Fallback to basic status check
-                bot_data = {
-                    "active": False,
-                    "status": "outage",
-                    "error": f"Service check failed: {str(e)}",
-                    "last_checked": datetime.now().isoformat(),
-                    "note": "Fallback status due to service check error"
-                }
-            
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                },
-                'body': json.dumps(bot_data)
-            }
-        
-        elif path == '/health' or path.endswith('/health'):
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                },
-                'body': json.dumps({
-                    'status': 'healthy', 
-                    'message': 'SpamShield Status API is running',
-                    'service': 'status-monitoring'
-                })
-            }
-        
-        else:
-            print(f"DEBUG: Falling back to generic response for path='{path}'")
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-                },
-                'body': json.dumps({
-                    'message': 'SpamShield Status API',
-                    'status': 'working',
-                    'path': path,
-                    'service': 'status-monitoring'
-                })
-            }
-            
-    except Exception as e:
-        print(f"Error in lambda_handler: {e}")
-        import traceback
-        traceback_str = traceback.format_exc()
-        print(f"Traceback: {traceback_str}")
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-            },
-            'body': json.dumps({
-                'error': 'Internal server error', 
-                'details': str(e),
-                'traceback': traceback_str,
-                'event_received': str(event)[:500] if event else 'No event received'
-            })
+        'body': json.dumps(body)
         }

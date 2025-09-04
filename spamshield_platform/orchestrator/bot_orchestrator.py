@@ -369,15 +369,27 @@ class BotOrchestrator:
                 ).first()
                 
                 if instance:
-                    assignment = GroupAssignment(
-                        group_id=group_id,
-                        instance_id=instance.id,
-                        status='active'
-                    )
-                    session.add(assignment)
-                    session.commit()
+                    # Check if assignment already exists
+                    existing_assignment = session.query(GroupAssignment).filter(
+                        GroupAssignment.group_id == group_id,
+                        GroupAssignment.instance_id == instance.id
+                    ).first()
                     
-                    logger.info(f"Assigned group {group_id} to worker {best_worker}")
+                    if not existing_assignment:
+                        assignment = GroupAssignment(
+                            group_id=group_id,
+                            instance_id=instance.id,
+                            status='active'
+                        )
+                        session.add(assignment)
+                        session.commit()
+                        logger.info(f"Assigned group {group_id} to worker {best_worker}")
+                    else:
+                        # Update existing assignment to active if needed
+                        if existing_assignment.status != 'active':
+                            existing_assignment.status = 'active'
+                            session.commit()
+                        logger.info(f"Group {group_id} already assigned to worker {best_worker}, updated status")
             
         except Exception as e:
             logger.error(f"Failed to assign group {group_id}: {e}")

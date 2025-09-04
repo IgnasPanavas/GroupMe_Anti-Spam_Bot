@@ -8,23 +8,16 @@ const StatusPage = () => {
     api: { status: 'checking', uptime: null, name: 'API', lastCheck: null },
     lambda: { status: 'checking', uptime: null, name: 'Lambda Function', lastCheck: null },
     ec2: { status: 'checking', uptime: null, name: 'EC2 Instance', lastCheck: null, instanceInfo: null },
-    groupme: { status: 'checking', uptime: null, name: 'GroupMe Bot', lastCheck: null, botInfo: null }
+    groupme: { status: 'checking', uptime: null, name: 'SpamShield Platform', lastCheck: null, botInfo: null }
   });
 
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [dataSource, setDataSource] = useState('live');
   const servicesRef = useRef(services);
 
-
-
-  // No synthetic uptime generation. Bars display only persisted history.
-
-  const checkServiceHealth = useCallback(async (isManualRefresh = false) => {
-    console.log('🔄 Health check started at:', new Date().toLocaleTimeString());
-    if (isManualRefresh) {
-      setRefreshing(true);
-    }
+  const checkServiceHealthFallback = useCallback(async (isManualRefresh = false) => {
     const newServices = { ...servicesRef.current };
     
     try {
@@ -46,7 +39,6 @@ const StatusPage = () => {
 
     // Check Lambda function status
     try {
-      // Consider Lambda reachable if API health is OK
       const response = await apiService.health();
       newServices.lambda = {
         ...newServices.lambda,
@@ -62,7 +54,7 @@ const StatusPage = () => {
       };
     }
 
-    // Check EC2 instance status - use API Gateway endpoint
+    // Check EC2 instance status
     try {
       const response = await apiService.getEc2Status();
       const ec2Data = response.data;
@@ -82,100 +74,75 @@ const StatusPage = () => {
       };
     }
 
-    // GroupMe Bot status - use API Gateway endpoint
+    // SpamShield Platform status
     try {
       const response = await apiService.getBotStatus();
-      const botData = response.data;
-      const botStatus = botData.active ? 'operational' : 'degraded';
+      const platformData = response.data;
+      
+      let platformStatus = 'outage';
+      if (platformData.active && platformData.platform_status === 'running') {
+        platformStatus = 'operational';
+      } else if (platformData.active && platformData.platform_status === 'stopped') {
+        platformStatus = 'degraded';
+      }
+      
       newServices.groupme = {
         ...newServices.groupme,
-        status: botStatus,
+        name: 'SpamShield Platform',
+        status: platformStatus,
         lastCheck: new Date(),
-        botInfo: botData
+        botInfo: {
+          ...platformData,
+          displayStatus: platformData.active ? 'Active' : 'Inactive',
+          groupsInfo: `${platformData.active_groups || 0}/${platformData.total_groups || 0} groups active`,
+          workersInfo: `${platformData.workers || 0} workers running`,
+          healthInfo: `DB: ${platformData.database_status || 'unknown'}, Metrics: ${platformData.metrics_status || 'unknown'}`
+        }
       };
     } catch (error) {
       newServices.groupme = {
         ...newServices.groupme,
+        name: 'SpamShield Platform',
         status: 'outage',
         lastCheck: new Date(),
-        botInfo: { active: false, error: 'Cannot reach bot status endpoint' }
-      };
-    }
-
-    // Persist per-service statuses to uptime history
-    try {
-      const persist = async (serviceKey, statusValue, details = {}) => {
-        await apiService.postUptimeRecord({ service: serviceKey, status: statusValue, details });
-      };
-      await Promise.all([
-        persist('api', newServices.api.status),
-        persist('lambda', newServices.lambda.status),
-        persist('ec2', newServices.ec2.status),
-        persist('bot', newServices.groupme.status),
-      ]);
-    } catch (e) {
-      // Non-blocking
-    }
-
-    // Fetch and apply uptime history for bars (real persistent data)
-    const totalBars = 90; // 5-minute intervals
-    const fetchHistory = async (serviceKey, fallbackStatus = 'no_data') => {
-      try {
-        const resp = await apiService.getUptimeHistory({ minutes: 450, limit: totalBars, service: serviceKey });
-        const records = resp?.data?.records || [];
-        const historyData = records.slice(-totalBars).map(r => ({ timestamp: r.timestamp, status: r.status || 'no_data' }));
-        
-        // Always add current status as the most recent bar
-        const currentTime = new Date().toISOString();
-        const currentStatus = newServices[serviceKey === 'bot' ? 'groupme' : serviceKey]?.status || fallbackStatus;
-        
-        // Add current status to the end of history
-        historyData.push({ timestamp: currentTime, status: currentStatus });
-        
-        return historyData;
-      } catch (error) {
-        console.warn(`Failed to fetch uptime history for ${serviceKey}:`, error);
-        // Return fallback data showing current status and some historical context
-        const fallbackData = [];
-        const currentTime = new Date();
-        const currentStatus = newServices[serviceKey === 'bot' ? 'groupme' : serviceKey]?.status || fallbackStatus;
-        
-        // Generate minimal fallback data with current status as the latest bar
-        for (let i = 0; i < totalBars - 1; i++) {
-          const timestamp = new Date(currentTime.getTime() - (totalBars - 1 - i) * 5 * 60 * 1000);
-          fallbackData.push({ timestamp: timestamp.toISOString(), status: 'no_data' });
+        botInfo: { 
+          active: false, 
+          error: 'Cannot reach SpamShield platform endpoint',
+          displayStatus: 'Offline',
+          groupsInfo: '0/0 groups active',
+          workersInfo: '0 workers running',
+          healthInfo: 'Components unknown'
         }
-        
-        // Add current status as the most recent bar
-        fallbackData.push({ timestamp: currentTime.toISOString(), status: currentStatus });
-        
-        return fallbackData;
-      }
-    };
+      };
+    }
 
+    // Fetch uptime history for all services
     try {
-      const [apiBars, lambdaBars, ec2Bars, botBars] = await Promise.all([
-        fetchHistory('api'),
-        fetchHistory('lambda'),
-        fetchHistory('ec2'),
-        fetchHistory('bot'),
-      ]);
-
-      newServices.api = { ...newServices.api, uptimeData: apiBars };
-      newServices.lambda = { ...newServices.lambda, uptimeData: lambdaBars };
-      newServices.ec2 = { ...newServices.ec2, uptimeData: ec2Bars };
-      newServices.groupme = { ...newServices.groupme, uptimeData: botBars };
-    } catch (e) {
-      // Fallback: ensure all services have at least basic uptime data
-      const fallbackData = Array(totalBars).fill(null).map((_, i) => ({
-        timestamp: new Date(Date.now() - (totalBars - 1 - i) * 5 * 60 * 1000).toISOString(),
-        status: i === totalBars - 1 ? 'outage' : 'no_data' // Latest bar shows outage, others no data
-      }));
+      console.log('📊 Fetching uptime history for 7.5 hours...');
+      const uptimeResponse = await apiService.getUptimeHistory({ minutes: 450 }); // 7.5 hours
+      const uptimeRecords = uptimeResponse.data.records || [];
+      console.log('📊 Uptime history fetched:', uptimeRecords.length, 'records');
       
-      newServices.api = { ...newServices.api, uptimeData: fallbackData };
-      newServices.lambda = { ...newServices.lambda, uptimeData: fallbackData };
-      newServices.ec2 = { ...newServices.ec2, uptimeData: fallbackData };
-      newServices.groupme = { ...newServices.groupme, uptimeData: fallbackData };
+      // Group uptime data by service
+      const uptimeByService = {};
+      uptimeRecords.forEach(record => {
+        if (!uptimeByService[record.service]) {
+          uptimeByService[record.service] = [];
+        }
+        uptimeByService[record.service].push({
+          timestamp: record.timestamp,
+          status: record.status
+        });
+      });
+
+      // Add uptime data to each service
+      Object.keys(newServices).forEach(serviceKey => {
+        const serviceName = serviceKey === 'groupme' ? 'bot' : serviceKey;
+        newServices[serviceKey].uptimeData = uptimeByService[serviceName] || [];
+      });
+    } catch (error) {
+      console.error('Error fetching uptime history:', error);
+      // Don't fail the entire health check if uptime data fails
     }
 
     setServices(newServices);
@@ -185,11 +152,114 @@ const StatusPage = () => {
       setRefreshing(false);
     }
     servicesRef.current = newServices;
-  }, []); // No dependencies needed now
+    setDataSource('fallback');
+  }, []);
+
+  const checkServiceHealth = useCallback(async (isManualRefresh = false) => {
+    console.log('🔄 Health check started at:', new Date().toLocaleTimeString());
+    if (isManualRefresh) {
+      setRefreshing(true);
+    }
+    
+    try {
+      // Use the new fast status summary endpoint
+      const response = await apiService.getStatusSummary();
+      const statusData = response.data;
+      
+      console.log('📊 Status summary data:', statusData);
+      setDataSource(statusData.data_source || 'live');
+      
+      const newServices = { ...servicesRef.current };
+      
+      // Update API status
+      newServices.api = {
+        ...newServices.api,
+        status: statusData.api?.status || 'unknown',
+        lastCheck: statusData.api?.lastCheck ? new Date(statusData.api.lastCheck) : new Date(),
+        healthData: statusData.api
+      };
+      
+      // Update Lambda status
+      newServices.lambda = {
+        ...newServices.lambda,
+        status: statusData.lambda?.status || 'unknown',
+        lastCheck: statusData.lambda?.lastCheck ? new Date(statusData.lambda.lastCheck) : new Date(),
+        healthData: statusData.lambda
+      };
+      
+      // Update EC2 status
+      newServices.ec2 = {
+        ...newServices.ec2,
+        status: statusData.ec2?.status || 'unknown',
+        lastCheck: statusData.ec2?.lastCheck ? new Date(statusData.ec2.lastCheck) : new Date(),
+        instanceInfo: statusData.ec2
+      };
+      
+      // Update SpamShield Platform status
+      newServices.groupme = {
+        ...newServices.groupme,
+        name: 'SpamShield Platform',
+        status: statusData.bot?.status || 'unknown',
+        lastCheck: statusData.bot?.lastCheck ? new Date(statusData.bot.lastCheck) : new Date(),
+        botInfo: {
+          ...statusData.bot,
+          // Add display-friendly fields
+          displayStatus: statusData.bot?.platform_status === 'running' ? 'Active' : 'Inactive',
+          groupsInfo: `${statusData.bot?.active_groups || 0}/${statusData.bot?.total_groups || 0} groups active`,
+          workersInfo: `${statusData.bot?.workers || 0} workers running`,
+          healthInfo: `Platform: ${statusData.bot?.platform_status || 'unknown'}`
+        }
+      };
+      
+      // Fetch uptime history for all services
+      try {
+        console.log('📊 Fetching uptime history for 7.5 hours...');
+        const uptimeResponse = await apiService.getUptimeHistory({ minutes: 450 }); // 7.5 hours
+        const uptimeRecords = uptimeResponse.data.records || [];
+        console.log('📊 Uptime history fetched:', uptimeRecords.length, 'records');
+        
+        // Group uptime data by service
+        const uptimeByService = {};
+        uptimeRecords.forEach(record => {
+          if (!uptimeByService[record.service]) {
+            uptimeByService[record.service] = [];
+          }
+          uptimeByService[record.service].push({
+            timestamp: record.timestamp,
+            status: record.status
+          });
+        });
+
+        // Add uptime data to each service
+        Object.keys(newServices).forEach(serviceKey => {
+          const serviceName = serviceKey === 'groupme' ? 'bot' : serviceKey;
+          newServices[serviceKey].uptimeData = uptimeByService[serviceName] || [];
+        });
+      } catch (error) {
+        console.error('Error fetching uptime history:', error);
+        // Don't fail the entire health check if uptime data fails
+      }
+
+      setServices(newServices);
+      setLastUpdated(new Date());
+      setLoading(false);
+      if (isManualRefresh) {
+        setRefreshing(false);
+      }
+      servicesRef.current = newServices;
+      
+    } catch (error) {
+      console.error('Error fetching status summary:', error);
+      
+      // Fallback to individual API calls if the fast endpoint fails
+      console.log('🔄 Falling back to individual API calls...');
+      await checkServiceHealthFallback(isManualRefresh);
+    }
+  }, [checkServiceHealthFallback]);
 
   useEffect(() => {
     checkServiceHealth();
-    const interval = setInterval(checkServiceHealth, 900000); // Check every 15 minutes (900,000 ms)
+    const interval = setInterval(checkServiceHealth, 300000); // Check every 5 minutes (300,000 ms)
     
     return () => clearInterval(interval);
   }, [checkServiceHealth]);
@@ -216,8 +286,6 @@ const StatusPage = () => {
     }
   };
 
-  
-
   const renderServiceDetails = (service) => {
     if (service.instanceInfo) {
       return (
@@ -225,9 +293,30 @@ const StatusPage = () => {
           {service.instanceInfo.error && (
             <p className="text-red-600">Error: {service.instanceInfo.error}</p>
           )}
+          {service.instanceInfo.state && (
+            <p><span className="font-medium">State:</span> {service.instanceInfo.state}</p>
+          )}
+          {service.instanceInfo.publicIp && (
+            <p><span className="font-medium">IP:</span> {service.instanceInfo.publicIp}</p>
+          )}
         </div>
       );
     }
+    
+    if (service.botInfo && service.name === 'SpamShield Platform') {
+      return (
+        <div className="mt-2 text-sm text-gray-600 space-y-1">
+          <p><span className="font-medium">Status:</span> {service.botInfo.displayStatus}</p>
+          <p><span className="font-medium">Groups:</span> {service.botInfo.groupsInfo}</p>
+          <p><span className="font-medium">Workers:</span> {service.botInfo.workersInfo}</p>
+          <p><span className="font-medium">Health:</span> {service.botInfo.healthInfo}</p>
+          {service.botInfo.error && (
+            <p className="text-red-600 mt-2">Error: {service.botInfo.error}</p>
+          )}
+        </div>
+      );
+    }
+    
     return null;
   };
 
@@ -260,6 +349,9 @@ const StatusPage = () => {
           <p className="mt-2 opacity-90 text-sm">
             Last updated: {lastUpdated.toLocaleString()}
           </p>
+          <p className="mt-1 opacity-75 text-xs">
+            Data source: {dataSource === 'uptime_logs' ? 'Server-side monitoring' : dataSource}
+          </p>
         </div>
       </div>
 
@@ -267,7 +359,7 @@ const StatusPage = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <p className="text-gray-600">
-            Real-time system status monitoring. All data is live from actual services.
+            Real-time system status monitoring. {dataSource === 'uptime_logs' ? 'Data from server-side monitoring system.' : 'Data from live API calls.'}
           </p>
           <p className="text-sm text-gray-500 mt-2">
             Uptime over the past 45 hours (30-minute periods). Recent bars show current status, grey bars indicate no historical data available yet.
@@ -325,7 +417,14 @@ const StatusPage = () => {
           ))}
         </div>
 
-        {/* Additional Info section removed to avoid hardcoded values */}
+        {/* Performance Info */}
+        <div className="mt-8 bg-blue-50 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-blue-900 mb-2">Performance Optimization</h3>
+          <p className="text-blue-700 text-sm">
+            This status page now uses the new comprehensive API endpoint for faster loading times. 
+            {dataSource === 'uptime_logs' ? ' Data is sourced from server-side monitoring logs for maximum reliability.' : ' Fallback to individual API calls when needed.'}
+          </p>
+        </div>
       </div>
       
       <Footer />

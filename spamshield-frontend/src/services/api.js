@@ -50,6 +50,10 @@ export const apiService = {
   // Model Status
   getModelStatus: () => api.get('/model-status'),
 
+  // Fast Status Summary - new comprehensive endpoint
+  getStatusSummary: () => api.get('/status-summary'),
+  getFastStatusSummary: () => api.get('/fast/status-summary'),
+
   // Uptime history (proxied via API Gateway to EC2 health server)
   getUptimeHistory: (params = {}) => api.get('/uptime-history', { params }),
   postUptimeRecord: ({ service, status, details }) => api.post('/uptime-history', { service, status, details }),
