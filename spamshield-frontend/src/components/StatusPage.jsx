@@ -15,7 +15,17 @@ const StatusPage = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dataSource, setDataSource] = useState('live');
+  const [uptimeWindowHours, setUptimeWindowHours] = useState(45);
   const servicesRef = useRef(services);
+
+  // Determine how many minutes of history are required for the bars on this device
+  const computeUptimeMinutes = () => {
+    const width = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const barCount = width < 640 ? 30 : width < 1024 ? 60 : 90; // must match UptimeBars.jsx
+    const minutes = barCount * 30; // 30 minutes per bar
+    setUptimeWindowHours((minutes / 60));
+    return minutes;
+  };
 
   const checkServiceHealthFallback = useCallback(async (isManualRefresh = false) => {
     const newServices = { ...servicesRef.current };
@@ -118,8 +128,10 @@ const StatusPage = () => {
 
     // Fetch uptime history for all services
     try {
-      console.log('📊 Fetching uptime history for 7.5 hours...');
-      const uptimeResponse = await apiService.getUptimeHistory({ minutes: 450 }); // 7.5 hours
+      const minutes = computeUptimeMinutes();
+      const limit = minutes * 2; // ensure enough records beyond default backend cap
+      console.log(`📊 Fetching uptime history for ${minutes/60} hours with limit ${limit}...`);
+      const uptimeResponse = await apiService.getUptimeHistory({ minutes, limit });
       const uptimeRecords = uptimeResponse.data.records || [];
       console.log('📊 Uptime history fetched:', uptimeRecords.length, 'records');
       
@@ -213,8 +225,10 @@ const StatusPage = () => {
       
       // Fetch uptime history for all services
       try {
-        console.log('📊 Fetching uptime history for 7.5 hours...');
-        const uptimeResponse = await apiService.getUptimeHistory({ minutes: 450 }); // 7.5 hours
+        const minutes = computeUptimeMinutes();
+        const limit = minutes * 2; // ensure enough records beyond default backend cap
+        console.log(`📊 Fetching uptime history for ${minutes/60} hours with limit ${limit}...`);
+        const uptimeResponse = await apiService.getUptimeHistory({ minutes, limit });
         const uptimeRecords = uptimeResponse.data.records || [];
         console.log('📊 Uptime history fetched:', uptimeRecords.length, 'records');
         
@@ -338,31 +352,28 @@ const StatusPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      
-      {/* Overall Status Banner */}
-      <div className={`${isAllOperational ? 'bg-green-500' : 'bg-red-500'} text-white py-6`}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+    <div className="min-h-screen bg-white flex flex-col section-divider">
+      <div className="flex-grow py-16">
+        {/* Overall Status Banner */}
+      <div className={`${isAllOperational ? 'bg-green-500' : 'bg-orange-500'} text-white py-6`}>
+        <div className="w-full max-w-[960px] mx-auto px-4 sm:px-6 lg:px-8 text-center" style={{ boxSizing: 'border-box' }}>
           <h2 className="text-xl font-semibold">
             {isAllOperational ? 'All Systems Operational' : 'System Issues Detected'}
           </h2>
           <p className="mt-2 opacity-90 text-sm">
             Last updated: {lastUpdated.toLocaleString()}
           </p>
-          <p className="mt-1 opacity-75 text-xs">
-            Data source: {dataSource === 'uptime_logs' ? 'Server-side monitoring' : dataSource}
-          </p>
         </div>
       </div>
 
       {/* Services Overview */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="w-full max-w-[960px] mx-auto px-4 sm:px-6 lg:px-8 py-8" style={{ boxSizing: 'border-box' }}>
         <div className="mb-8">
           <p className="text-gray-600">
             Real-time system status monitoring. {dataSource === 'uptime_logs' ? 'Data from server-side monitoring system.' : 'Data from live API calls.'}
           </p>
           <p className="text-sm text-gray-500 mt-2">
-            Uptime over the past 45 hours (30-minute periods). Recent bars show current status, grey bars indicate no historical data available yet.
+            Uptime over the past {uptimeWindowHours} hours (30-minute periods). Recent bars show current status; grey bars indicate no historical data yet.
           </p>
           <button 
             onClick={() => checkServiceHealth(true)}
@@ -417,14 +428,8 @@ const StatusPage = () => {
           ))}
         </div>
 
-        {/* Performance Info */}
-        <div className="mt-8 bg-blue-50 rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-blue-900 mb-2">Performance Optimization</h3>
-          <p className="text-blue-700 text-sm">
-            This status page now uses the new comprehensive API endpoint for faster loading times. 
-            {dataSource === 'uptime_logs' ? ' Data is sourced from server-side monitoring logs for maximum reliability.' : ' Fallback to individual API calls when needed.'}
-          </p>
-        </div>
+        
+      </div>
       </div>
       
       <Footer />

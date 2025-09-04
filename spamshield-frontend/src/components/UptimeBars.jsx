@@ -1,14 +1,27 @@
 import React from 'react';
 
 /**
- * A component to display a series of uptime bars representing the last 7.5 hours.
- * It creates a sliding window of 90 bars, where each bar represents a 5-minute interval.
+ * A component to display a series of uptime bars representing the last 24 hours.
+ * It creates a sliding window of bars, where each bar represents a 30-minute interval.
  *
  * @param {object} props - The component props.
  * @param {Array<object>} props.uptimeData - Array of uptime status objects, e.g., { timestamp: 'ISO_STRING', status: 'operational' }.
  * @param {string} props.serviceName - The name of the service being monitored.
  */
 const UptimeBars = ({ uptimeData }) => {
+  const [windowWidth, setWindowWidth] = React.useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
+
+  // Handle window resize
+  React.useEffect(() => {
+    const handleResize = () => {
+      setWindowWidth(window.innerWidth);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    }
+  }, []);
 
   // --- Uptime Percentage Calculation ---
   // We wrap this in useMemo so it only recalculates when uptimeData changes.
@@ -26,10 +39,17 @@ const UptimeBars = ({ uptimeData }) => {
   // This is the core logic for creating the bars. It's wrapped in useMemo for performance.
   // It will only run when the uptimeData prop changes.
   const memoizedBars = React.useMemo(() => {
-    const totalBars = 90; // Represents 90 * 5 minutes = 7.5 hours
+    // Responsive bar count based on screen size (each bar = 30 minutes)
+    const getBarCount = () => {
+      if (windowWidth < 640) return 30; // Mobile: 30 bars (15 hours)
+      if (windowWidth < 1024) return 60; // Tablet: 60 bars (30 hours)
+      return 90; // Desktop: 90 bars (45 hours)
+    };
+    
+    const totalBars = getBarCount();
     const data = Array.isArray(uptimeData) ? uptimeData : [];
 
-    // --- 1. Compress raw data into 5-minute intervals ---
+    // --- 1. Compress raw data into 30-minute intervals ---
     const compressedData = [];
     if (data.length > 0) {
       // Ensure data is sorted oldest to newest before processing.
@@ -48,7 +68,7 @@ const UptimeBars = ({ uptimeData }) => {
         } else {
           const diffMinutes = (recordTime - intervalStartTime) / (1000 * 60);
 
-          if (diffMinutes >= 5) {
+          if (diffMinutes >= 30) {
             compressedData.push({
               timestamp: intervalStartTime.toISOString(),
               status: intervalWorstStatus,
@@ -97,25 +117,31 @@ const UptimeBars = ({ uptimeData }) => {
         default: break;
       }
 
+      // Responsive bar width
+      const getBarWidth = () => {
+        if (windowWidth < 640) return 'w-2'; // Mobile: wider bars
+        if (windowWidth < 1024) return 'w-1.5'; // Tablet: medium bars
+        return 'w-1'; // Desktop: thin bars
+      };
+
       return (
         <div
           key={barData.id}
-          className={`w-1 h-4 ${barColor} rounded-sm mx-px transition-colors duration-200 hover:opacity-80`}
+          className={`${getBarWidth()} h-4 ${barColor} rounded-sm mx-px transition-colors duration-200 hover:opacity-80`}
           title={barData.tooltip}
         />
       );
     });
-  }, [uptimeData]);
+  }, [uptimeData, windowWidth]);
 
-  const periodsWithDataCount = uptimeData ? uptimeData.filter(period => period.status !== 'no_data').length : 0;
 
   return (
     <div className="mt-4">
       <div className="flex items-center justify-between mb-2">
         {uptimePercentage !== null ? (
           <span className={`text-sm font-semibold ${
-            uptimePercentage >= 99.9 ? 'text-green-600' :
-            uptimePercentage >= 99.0 ? 'text-yellow-600' :
+            uptimePercentage >= 90.9 ? 'text-green-600' :
+            uptimePercentage >= 80.0 ? 'text-yellow-600' :
             'text-red-600'
           }`}>
             {uptimePercentage}% uptime
@@ -135,7 +161,11 @@ const UptimeBars = ({ uptimeData }) => {
           </div>
           
           <div className="flex justify-between text-xs text-gray-500">
-            <span>7.5 hours ago</span>
+            <span>
+              {windowWidth < 640 ? '15 hours ago' : 
+               windowWidth < 1024 ? '30 hours ago' : 
+               '45 hours ago'}
+            </span>
             
           </div>
         </div>
