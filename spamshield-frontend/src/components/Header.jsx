@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 
 const Header = () => {
   const menuItems = [
-    { name: 'Learn More', path: '/learn-more' }
+    
   ];
 
   return (

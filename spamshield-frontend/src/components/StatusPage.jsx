@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import Footer from './Footer';
 import UptimeBars from './UptimeBars';
 import { apiService } from '../services/api';
 
@@ -280,7 +279,7 @@ const StatusPage = () => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'operational': return 'text-green-600';
+      case 'operational': return 'text-green-700';
       case 'degraded': return 'text-yellow-600';
       case 'outage': return 'text-red-600';
       case 'checking': return 'text-blue-600';
@@ -291,7 +290,7 @@ const StatusPage = () => {
 
   const getStatusBackground = (status) => {
     switch (status) {
-      case 'operational': return 'bg-green-100';
+      case 'operational': return 'bg-green-50 border border-green-200';
       case 'degraded': return 'bg-yellow-100';
       case 'outage': return 'bg-red-100';
       case 'checking': return 'bg-blue-100';
@@ -340,11 +339,11 @@ const StatusPage = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-brownish-gray)' }}>
         <div className="flex items-center justify-center min-h-screen">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Checking system status...</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--theme-primary)' }}></div>
+            <p className="mt-4" style={{ color: 'var(--text-dark-gray)' }}>Checking system status...</p>
           </div>
         </div>
       </div>
@@ -352,10 +351,10 @@ const StatusPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col section-divider">
+    <div className="min-h-screen flex flex-col section-divider" style={{ backgroundColor: 'var(--bg-brownish-gray)' }}>
       <div className="flex-grow py-16">
         {/* Overall Status Banner */}
-      <div className={`${isAllOperational ? 'bg-green-500' : 'bg-orange-500'} text-white py-6`}>
+      <div className={`${isAllOperational ? 'text-white py-6' : 'bg-orange-500 text-white py-6'}`} style={isAllOperational ? { backgroundColor: 'var(--theme-primary)' } : {}}>
         <div className="w-full max-w-[960px] mx-auto px-4 sm:px-6 lg:px-8 text-center" style={{ boxSizing: 'border-box' }}>
           <h2 className="text-xl font-semibold">
             {isAllOperational ? 'All Systems Operational' : 'System Issues Detected'}
@@ -389,7 +388,7 @@ const StatusPage = () => {
         {/* Services Grid */}
         <div className="space-y-6">
           {Object.entries(services).map(([key, service]) => (
-            <div key={key} className="bg-white border border-gray-200 rounded-lg p-6">
+            <div key={key} className="bg-white/80 backdrop-blur-sm border border-gray-200 rounded-lg p-6 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-2">
                   <h3 className="text-lg font-semibold text-gray-900">{service.name}</h3>
@@ -432,7 +431,7 @@ const StatusPage = () => {
       </div>
       </div>
       
-      <Footer />
+
     </div>
   );
 };
